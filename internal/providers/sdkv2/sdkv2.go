@@ -29,6 +29,7 @@ import (
 	"github.com/databricks/terraform-provider-databricks/common"
 	"github.com/databricks/terraform-provider-databricks/dashboards"
 	"github.com/databricks/terraform-provider-databricks/finops"
+	"github.com/databricks/terraform-provider-databricks/genie"
 	"github.com/databricks/terraform-provider-databricks/internal/providers/client"
 	providercommon "github.com/databricks/terraform-provider-databricks/internal/providers/common"
 	"github.com/databricks/terraform-provider-databricks/internal/providers/pluginfw"
@@ -185,6 +186,7 @@ func DatabricksProvider(opts ...SdkV2ProviderOption) *schema.Provider {
 		"databricks_cluster_policy":                       policies.ResourceClusterPolicy().ToResource(),
 		"databricks_dashboard":                            dashboards.ResourceDashboard().ToResource(),
 		"databricks_dbfs_file":                            storage.ResourceDbfsFile().ToResource(),
+		"databricks_genie_space":                          genie.ResourceGenieSpace().ToResource(),
 		"databricks_directory":                            workspace.ResourceDirectory().ToResource(),
 		"databricks_entitlements":                         scim.ResourceEntitlements().ToResource(),
 		"databricks_external_location":                    catalog.ResourceExternalLocation().ToResource(),
