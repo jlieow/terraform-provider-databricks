@@ -62,6 +62,7 @@ var pluginFwOnlyDataSources = append(
 	[]func() datasource.DataSource{
 		app.DataSourceApp,
 		app.DataSourceApps,
+		genie_space.DataSourceGenieSpace,
 		catalog.DataSourceFunctions,
 		dashboards.DataSourceDashboards,
 		notificationdestinations.DataSourceNotificationDestinations,
