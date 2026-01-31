@@ -8,6 +8,8 @@
 
 ### New Features and Improvements
 
+* Added `databricks_genie_space` resource using Plugin Framework ([#TBD](https://github.com/databricks/terraform-provider-databricks/pull/TBD)).
+
 ### Bug Fixes
 
 ### Documentation

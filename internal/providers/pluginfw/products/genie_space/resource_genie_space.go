@@ -3,6 +3,7 @@ package genie_space
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 
 	"github.com/databricks/databricks-sdk-go/apierr"
@@ -330,22 +331,24 @@ func parseSerializedSpace(ctx context.Context, model *GenieSpaceModel, raw strin
 		return diag.Diagnostics{diag.NewErrorDiagnostic("failed to parse serialized space", err.Error())}
 	}
 
-	tables := make([]string, len(content.DataSources.Tables))
+	apiTables := make([]string, len(content.DataSources.Tables))
 	for i, t := range content.DataSources.Tables {
-		tables[i] = t.Identifier
+		apiTables[i] = t.Identifier
 	}
+	tables := reconcileListOrder(ctx, model.Tables, apiTables)
 	tablesList, diags := types.ListValueFrom(ctx, types.StringType, tables)
 	if diags.HasError() {
 		return diags
 	}
 	model.Tables = tablesList
 
-	questions := make([]string, 0, len(content.Config.SampleQuestions))
+	apiQuestions := make([]string, 0, len(content.Config.SampleQuestions))
 	for _, q := range content.Config.SampleQuestions {
 		if len(q.Question) > 0 {
-			questions = append(questions, q.Question[0])
+			apiQuestions = append(apiQuestions, q.Question[0])
 		}
 	}
+	questions := reconcileListOrder(ctx, model.SampleQuestions, apiQuestions)
 	questionsList, diags := types.ListValueFrom(ctx, types.StringType, questions)
 	if diags.HasError() {
 		return diags
@@ -353,4 +356,30 @@ func parseSerializedSpace(ctx context.Context, model *GenieSpaceModel, raw strin
 	model.SampleQuestions = questionsList
 
 	return nil
+}
+
+// reconcileListOrder preserves the order from the existing state when the API
+// returns the same set of elements in a different order. If the sets differ,
+// the API order is used as-is.
+func reconcileListOrder(ctx context.Context, stateList types.List, apiValues []string) []string {
+	if stateList.IsNull() || stateList.IsUnknown() {
+		return apiValues
+	}
+	var stateValues []string
+	stateList.ElementsAs(ctx, &stateValues, false)
+	if len(stateValues) != len(apiValues) {
+		return apiValues
+	}
+	stateSorted := make([]string, len(stateValues))
+	copy(stateSorted, stateValues)
+	sort.Strings(stateSorted)
+	apiSorted := make([]string, len(apiValues))
+	copy(apiSorted, apiValues)
+	sort.Strings(apiSorted)
+	for i := range stateSorted {
+		if stateSorted[i] != apiSorted[i] {
+			return apiValues
+		}
+	}
+	return stateValues
 }
