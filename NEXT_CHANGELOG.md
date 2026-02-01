@@ -8,6 +8,8 @@
 
 ### New Features and Improvements
 
+* Added `databricks_app_deployment` resource ([#XXXX](https://github.com/databricks/terraform-provider-databricks/pull/XXXX))
+
 ### Bug Fixes
 
 * Fix `databricks_app` resource fails to recreate resource when deleted outside of Terraform ([#XXXX](https://github.com/databricks/terraform-provider-databricks/pull/XXXX))
