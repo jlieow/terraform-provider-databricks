@@ -9,6 +9,8 @@ subcategory: "Apps"
 
 ## Example Usage
 
+### Basic App
+
 ```hcl
 resource "databricks_app" "this" {
   name        = "my-custom-app"
@@ -38,6 +40,34 @@ resource "databricks_app" "this" {
 }
 ```
 
+### App with Git Repository
+
+```hcl
+resource "databricks_git_credential" "github" {
+  git_provider          = "gitHub"
+  git_username          = "myuser"
+  personal_access_token = var.github_token
+}
+
+resource "databricks_app" "this" {
+  name        = "my-custom-app"
+  description = "My app with Git integration"
+
+  git_repository = {
+    provider = "gitHub"
+    url      = "https://github.com/myorg/myrepo"
+  }
+
+  resources = [{
+    name = "sql-warehouse"
+    sql_warehouse = {
+      id         = "e9ca293f79a74b5c"
+      permission = "CAN_MANAGE"
+    }
+  }]
+}
+```
+
 ## Argument Reference
 
 The following arguments are required:
@@ -45,9 +75,19 @@ The following arguments are required:
 * `name` - (Required) The name of the app. The name must contain only lowercase alphanumeric characters and hyphens. It must be unique within the workspace.
 * `description` - (Optional) The description of the app.
 * `budget_policy_id` - (Optional) The Budget Policy ID set for this resource.
+* `git_repository` - (Optional) Git repository configuration for app deployments. When specified, deployments can reference code from this repository by providing only the git reference (branch, tag, or commit). See [git_repository Configuration](#git_repository-configuration) below.
 * `resources` - (Optional) A list of resources that the app have access to.
 * `user_api_scopes` - (Optional) A list of api scopes granted to the user access token.
 * `compute_size` - (Optional) A string specifying compute size for the App. Possible values are `MEDIUM`, `LARGE`.
+
+### git_repository Configuration
+
+This block configures Git repository integration for app deployments:
+
+* `provider` - (Required) Git provider. Supported values: `gitHub`, `gitHubEnterprise`, `bitbucketCloud`, `bitbucketServer`, `azureDevOpsServices`, `gitLab`, `gitLabEnterpriseEdition`, `awsCodeCommit`.
+* `url` - (Required) URL of the Git repository (e.g., `https://github.com/myorg/myrepo`).
+
+-> **Note** To access private repositories, you must also configure `databricks_git_credential` with a personal access token for the specified provider.
 
 ### resources Configuration Attribute
 
@@ -127,6 +167,8 @@ terraform import databricks_app.this <app_name>
 
 The following resources are used in the same context:
 
+* [databricks_app_deployment](app_deployment.md) to deploy code to a Databricks app from workspace filesystem or Git repository.
+* [databricks_git_credential](git_credential.md) to manage Git credentials for accessing private repositories.
 * [databricks_sql_endpoint](sql_endpoint.md) to manage Databricks SQL [Endpoints](https://docs.databricks.com/sql/admin/sql-endpoints.html).
 * [databricks_model_serving](model_serving.md) to serve this model on a Databricks serving endpoint.
 * [databricks_secret](secret.md) to manage [secrets](https://docs.databricks.com/security/secrets/index.html#secrets-user-guide) in Databricks workspace.

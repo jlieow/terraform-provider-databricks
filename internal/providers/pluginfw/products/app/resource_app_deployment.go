@@ -126,9 +126,11 @@ func (r resourceAppDeployment) Schema(_ context.Context, _ resource.SchemaReques
 			"git_source": gitSourceSchema,
 			"mode": schema.StringAttribute{
 				Optional:    true,
-				Description: "The deployment mode. Allowed values are SNAPSHOT and AUTO_SYNC.",
+				Computed:    true,
+				Description: "The deployment mode. Allowed values are SNAPSHOT and AUTO_SYNC. If not specified, defaults to SNAPSHOT.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"triggers": schema.MapAttribute{
@@ -175,8 +177,14 @@ func (r *resourceAppDeployment) ValidateConfig(ctx context.Context, req resource
 	}
 
 	// Validate exactly one of source_code_path or git_source is specified
-	hasSourceCodePath := !config.SourceCodePath.IsNull() && !config.SourceCodePath.IsUnknown()
-	hasGitSource := !config.GitSource.IsNull() && !config.GitSource.IsUnknown()
+	// Allow Unknown values (e.g., from local variables) - they'll be validated at plan time
+	hasSourceCodePath := !config.SourceCodePath.IsNull()
+	hasGitSource := !config.GitSource.IsNull()
+
+	// Skip validation if values are unknown (will be resolved later)
+	if config.SourceCodePath.IsUnknown() || config.GitSource.IsUnknown() {
+		return
+	}
 
 	if !hasSourceCodePath && !hasGitSource {
 		resp.Diagnostics.AddError(
@@ -195,7 +203,7 @@ func (r *resourceAppDeployment) ValidateConfig(ctx context.Context, req resource
 	}
 
 	// If git_source is specified, validate exactly one of branch, tag, or commit
-	if hasGitSource {
+	if hasGitSource && !config.GitSource.IsUnknown() {
 		var gitSource gitSourceModel
 		diags := config.GitSource.As(ctx, &gitSource, basetypes.ObjectAsOptions{})
 		if diags.HasError() {
@@ -203,9 +211,14 @@ func (r *resourceAppDeployment) ValidateConfig(ctx context.Context, req resource
 			return
 		}
 
-		hasBranch := !gitSource.Branch.IsNull() && !gitSource.Branch.IsUnknown()
-		hasTag := !gitSource.Tag.IsNull() && !gitSource.Tag.IsUnknown()
-		hasCommit := !gitSource.Commit.IsNull() && !gitSource.Commit.IsUnknown()
+		// Skip validation if any values are unknown
+		if gitSource.Branch.IsUnknown() || gitSource.Tag.IsUnknown() || gitSource.Commit.IsUnknown() {
+			return
+		}
+
+		hasBranch := !gitSource.Branch.IsNull()
+		hasTag := !gitSource.Tag.IsNull()
+		hasCommit := !gitSource.Commit.IsNull()
 
 		refCount := 0
 		if hasBranch {
@@ -314,6 +327,36 @@ func (r *resourceAppDeployment) Create(ctx context.Context, req resource.CreateR
 	} else {
 		plan.Status = types.StringNull()
 	}
+	// Populate mode from API response (it has a default even if user didn't specify)
+	if deployment.Mode != "" {
+		plan.Mode = types.StringValue(string(deployment.Mode))
+	}
+
+	// Populate git_source with resolved_commit from deployment response
+	if deployment.GitSource != nil && !plan.GitSource.IsNull() {
+		var gitSource gitSourceModel
+		diags := plan.GitSource.As(ctx, &gitSource, basetypes.ObjectAsOptions{})
+		if diags.HasError() {
+			resp.Diagnostics.Append(diags...)
+			return
+		}
+
+		// Update resolved_commit from API response (computed field)
+		if deployment.GitSource.ResolvedCommit != "" {
+			gitSource.ResolvedCommit = types.StringValue(deployment.GitSource.ResolvedCommit)
+		}
+
+		// Keep git_repository from plan - don't overwrite with API response
+		// The API returns the git_repository, but we shouldn't populate it if user didn't specify it
+
+		gitSourceObj, diags := types.ObjectValueFrom(ctx, gitSourceAttrTypes(), gitSource)
+		if diags.HasError() {
+			resp.Diagnostics.Append(diags...)
+			return
+		}
+		plan.GitSource = gitSourceObj
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -346,12 +389,22 @@ func (r *resourceAppDeployment) Read(ctx context.Context, req resource.ReadReque
 
 	// Populate git_source if this is a Git deployment
 	if deployment.GitSource != nil {
+		// Get existing git_source from state to preserve user-specified values
+		var existingGitSource gitSourceModel
+		if !state.GitSource.IsNull() {
+			diags := state.GitSource.As(ctx, &existingGitSource, basetypes.ObjectAsOptions{})
+			if diags.HasError() {
+				resp.Diagnostics.Append(diags...)
+				return
+			}
+		}
+
 		gitSource := gitSourceModel{
 			Branch:         types.StringNull(),
 			Tag:            types.StringNull(),
 			Commit:         types.StringNull(),
 			SourceCodePath: types.StringNull(),
-			GitRepository:  types.ObjectNull(gitRepositoryAttrTypes()),
+			GitRepository:  existingGitSource.GitRepository, // Preserve from state
 			ResolvedCommit: types.StringNull(),
 		}
 
@@ -371,19 +424,8 @@ func (r *resourceAppDeployment) Read(ctx context.Context, req resource.ReadReque
 			gitSource.ResolvedCommit = types.StringValue(deployment.GitSource.ResolvedCommit)
 		}
 
-		// Populate git_repository if present
-		if deployment.GitSource.GitRepository != nil {
-			gitRepo := gitRepositoryModel{
-				Provider: types.StringValue(deployment.GitSource.GitRepository.Provider),
-				Url:      types.StringValue(deployment.GitSource.GitRepository.Url),
-			}
-			gitRepoObj, diags := types.ObjectValueFrom(ctx, gitRepositoryAttrTypes(), gitRepo)
-			if diags.HasError() {
-				resp.Diagnostics.Append(diags...)
-				return
-			}
-			gitSource.GitRepository = gitRepoObj
-		}
+		// Don't populate git_repository from API - keep what was in state
+		// The API returns it, but we should preserve user's config (or lack thereof)
 
 		gitSourceObj, diags := types.ObjectValueFrom(ctx, gitSourceAttrTypes(), gitSource)
 		if diags.HasError() {
@@ -397,6 +439,8 @@ func (r *resourceAppDeployment) Read(ctx context.Context, req resource.ReadReque
 	state.CreateTime = types.StringValue(deployment.CreateTime)
 	if deployment.Mode != "" {
 		state.Mode = types.StringValue(string(deployment.Mode))
+	} else {
+		state.Mode = types.StringNull()
 	}
 	if deployment.Status != nil {
 		state.Status = types.StringValue(string(deployment.Status.State))
