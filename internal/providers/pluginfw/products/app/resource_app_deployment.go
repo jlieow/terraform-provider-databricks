@@ -9,12 +9,15 @@ import (
 	"github.com/databricks/terraform-provider-databricks/common"
 	pluginfwcommon "github.com/databricks/terraform-provider-databricks/internal/providers/pluginfw/common"
 	pluginfwcontext "github.com/databricks/terraform-provider-databricks/internal/providers/pluginfw/context"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 const deploymentResourceName = "app_deployment"
@@ -26,11 +29,26 @@ func ResourceAppDeployment() resource.Resource {
 type appDeploymentModel struct {
 	AppName        types.String `tfsdk:"app_name"`
 	SourceCodePath types.String `tfsdk:"source_code_path"`
+	GitSource      types.Object `tfsdk:"git_source"`
 	Mode           types.String `tfsdk:"mode"`
 	Triggers       types.Map    `tfsdk:"triggers"`
 	DeploymentId   types.String `tfsdk:"deployment_id"`
 	Status         types.String `tfsdk:"status"`
 	CreateTime     types.String `tfsdk:"create_time"`
+}
+
+type gitSourceModel struct {
+	Branch         types.String `tfsdk:"branch"`
+	Tag            types.String `tfsdk:"tag"`
+	Commit         types.String `tfsdk:"commit"`
+	SourceCodePath types.String `tfsdk:"source_code_path"`
+	GitRepository  types.Object `tfsdk:"git_repository"`
+	ResolvedCommit types.String `tfsdk:"resolved_commit"`
+}
+
+type gitRepositoryModel struct {
+	Provider types.String `tfsdk:"provider"`
+	Url      types.String `tfsdk:"url"`
 }
 
 type resourceAppDeployment struct {
@@ -42,6 +60,52 @@ func (r resourceAppDeployment) Metadata(_ context.Context, req resource.Metadata
 }
 
 func (r resourceAppDeployment) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	gitRepositorySchema := schema.SingleNestedAttribute{
+		Optional:    true,
+		Description: "Git repository configuration. If not specified, uses the app's git_repository configuration.",
+		Attributes: map[string]schema.Attribute{
+			"provider": schema.StringAttribute{
+				Required:    true,
+				Description: "Git provider. Supported values: gitHub, gitHubEnterprise, bitbucketCloud, bitbucketServer, azureDevOpsServices, gitLab, gitLabEnterpriseEdition, awsCodeCommit.",
+			},
+			"url": schema.StringAttribute{
+				Required:    true,
+				Description: "URL of the Git repository.",
+			},
+		},
+	}
+
+	gitSourceSchema := schema.SingleNestedAttribute{
+		Optional:    true,
+		Description: "Git source configuration for the deployment. Conflicts with source_code_path.",
+		Attributes: map[string]schema.Attribute{
+			"branch": schema.StringAttribute{
+				Optional:    true,
+				Description: "Git branch to checkout. Exactly one of branch, tag, or commit must be specified.",
+			},
+			"tag": schema.StringAttribute{
+				Optional:    true,
+				Description: "Git tag to checkout. Exactly one of branch, tag, or commit must be specified.",
+			},
+			"commit": schema.StringAttribute{
+				Optional:    true,
+				Description: "Git commit SHA to checkout. Exactly one of branch, tag, or commit must be specified.",
+			},
+			"source_code_path": schema.StringAttribute{
+				Optional:    true,
+				Description: "Relative path to the app source code within the Git repository. If not specified, the root of the repository is used.",
+			},
+			"git_repository": gitRepositorySchema,
+			"resolved_commit": schema.StringAttribute{
+				Computed:    true,
+				Description: "The resolved commit SHA that was actually used for the deployment.",
+			},
+		},
+		PlanModifiers: []planmodifier.Object{
+			objectplanmodifier.RequiresReplace(),
+		},
+	}
+
 	resp.Schema = schema.Schema{
 		Description: "Deploys code to a Databricks app.",
 		Attributes: map[string]schema.Attribute{
@@ -53,12 +117,13 @@ func (r resourceAppDeployment) Schema(_ context.Context, _ resource.SchemaReques
 				},
 			},
 			"source_code_path": schema.StringAttribute{
-				Required:    true,
-				Description: "The workspace filesystem path of the source code to deploy.",
+				Optional:    true,
+				Description: "The workspace filesystem path of the source code to deploy. Conflicts with git_source.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			"git_source": gitSourceSchema,
 			"mode": schema.StringAttribute{
 				Optional:    true,
 				Description: "The deployment mode. Allowed values are SNAPSHOT and AUTO_SYNC.",
@@ -102,6 +167,71 @@ func (r *resourceAppDeployment) Configure(_ context.Context, req resource.Config
 	}
 }
 
+func (r *resourceAppDeployment) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var config appDeploymentModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Validate exactly one of source_code_path or git_source is specified
+	hasSourceCodePath := !config.SourceCodePath.IsNull() && !config.SourceCodePath.IsUnknown()
+	hasGitSource := !config.GitSource.IsNull() && !config.GitSource.IsUnknown()
+
+	if !hasSourceCodePath && !hasGitSource {
+		resp.Diagnostics.AddError(
+			"Missing required field",
+			"Exactly one of 'source_code_path' or 'git_source' must be specified",
+		)
+		return
+	}
+
+	if hasSourceCodePath && hasGitSource {
+		resp.Diagnostics.AddError(
+			"Conflicting fields",
+			"Only one of 'source_code_path' or 'git_source' can be specified, not both",
+		)
+		return
+	}
+
+	// If git_source is specified, validate exactly one of branch, tag, or commit
+	if hasGitSource {
+		var gitSource gitSourceModel
+		diags := config.GitSource.As(ctx, &gitSource, basetypes.ObjectAsOptions{})
+		if diags.HasError() {
+			resp.Diagnostics.Append(diags...)
+			return
+		}
+
+		hasBranch := !gitSource.Branch.IsNull() && !gitSource.Branch.IsUnknown()
+		hasTag := !gitSource.Tag.IsNull() && !gitSource.Tag.IsUnknown()
+		hasCommit := !gitSource.Commit.IsNull() && !gitSource.Commit.IsUnknown()
+
+		refCount := 0
+		if hasBranch {
+			refCount++
+		}
+		if hasTag {
+			refCount++
+		}
+		if hasCommit {
+			refCount++
+		}
+
+		if refCount == 0 {
+			resp.Diagnostics.AddError(
+				"Missing required field in git_source",
+				"Exactly one of 'branch', 'tag', or 'commit' must be specified in git_source",
+			)
+		} else if refCount > 1 {
+			resp.Diagnostics.AddError(
+				"Conflicting fields in git_source",
+				"Only one of 'branch', 'tag', or 'commit' can be specified in git_source",
+			)
+		}
+	}
+}
+
 func (r *resourceAppDeployment) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	ctx = pluginfwcontext.SetUserAgentInResourceContext(ctx, deploymentResourceName)
 
@@ -118,11 +248,55 @@ func (r *resourceAppDeployment) Create(ctx context.Context, req resource.CreateR
 	}
 
 	deployReq := apps.CreateAppDeploymentRequest{
-		AppName: plan.AppName.ValueString(),
-		AppDeployment: apps.AppDeployment{
-			SourceCodePath: plan.SourceCodePath.ValueString(),
-		},
+		AppName:       plan.AppName.ValueString(),
+		AppDeployment: apps.AppDeployment{},
 	}
+
+	// Handle source_code_path (workspace filesystem deployment)
+	if !plan.SourceCodePath.IsNull() && !plan.SourceCodePath.IsUnknown() {
+		deployReq.AppDeployment.SourceCodePath = plan.SourceCodePath.ValueString()
+	}
+
+	// Handle git_source (Git repository deployment)
+	if !plan.GitSource.IsNull() && !plan.GitSource.IsUnknown() {
+		var gitSource gitSourceModel
+		diags := plan.GitSource.As(ctx, &gitSource, basetypes.ObjectAsOptions{})
+		if diags.HasError() {
+			resp.Diagnostics.Append(diags...)
+			return
+		}
+
+		deployReq.AppDeployment.GitSource = &apps.GitSource{}
+
+		if !gitSource.Branch.IsNull() && !gitSource.Branch.IsUnknown() {
+			deployReq.AppDeployment.GitSource.Branch = gitSource.Branch.ValueString()
+		}
+		if !gitSource.Tag.IsNull() && !gitSource.Tag.IsUnknown() {
+			deployReq.AppDeployment.GitSource.Tag = gitSource.Tag.ValueString()
+		}
+		if !gitSource.Commit.IsNull() && !gitSource.Commit.IsUnknown() {
+			deployReq.AppDeployment.GitSource.Commit = gitSource.Commit.ValueString()
+		}
+		if !gitSource.SourceCodePath.IsNull() && !gitSource.SourceCodePath.IsUnknown() {
+			deployReq.AppDeployment.GitSource.SourceCodePath = gitSource.SourceCodePath.ValueString()
+		}
+
+		// Handle git_repository if specified
+		if !gitSource.GitRepository.IsNull() && !gitSource.GitRepository.IsUnknown() {
+			var gitRepo gitRepositoryModel
+			diags := gitSource.GitRepository.As(ctx, &gitRepo, basetypes.ObjectAsOptions{})
+			if diags.HasError() {
+				resp.Diagnostics.Append(diags...)
+				return
+			}
+
+			deployReq.AppDeployment.GitSource.GitRepository = &apps.GitRepository{
+				Provider: gitRepo.Provider.ValueString(),
+				Url:      gitRepo.Url.ValueString(),
+			}
+		}
+	}
+
 	if !plan.Mode.IsNull() && !plan.Mode.IsUnknown() {
 		deployReq.AppDeployment.Mode = apps.AppDeploymentMode(plan.Mode.ValueString())
 	}
@@ -164,7 +338,62 @@ func (r *resourceAppDeployment) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	state.SourceCodePath = types.StringValue(deployment.SourceCodePath)
+	// Populate source_code_path if this is a workspace deployment
+	if deployment.SourceCodePath != "" {
+		state.SourceCodePath = types.StringValue(deployment.SourceCodePath)
+		state.GitSource = types.ObjectNull(gitSourceAttrTypes())
+	}
+
+	// Populate git_source if this is a Git deployment
+	if deployment.GitSource != nil {
+		gitSource := gitSourceModel{
+			Branch:         types.StringNull(),
+			Tag:            types.StringNull(),
+			Commit:         types.StringNull(),
+			SourceCodePath: types.StringNull(),
+			GitRepository:  types.ObjectNull(gitRepositoryAttrTypes()),
+			ResolvedCommit: types.StringNull(),
+		}
+
+		if deployment.GitSource.Branch != "" {
+			gitSource.Branch = types.StringValue(deployment.GitSource.Branch)
+		}
+		if deployment.GitSource.Tag != "" {
+			gitSource.Tag = types.StringValue(deployment.GitSource.Tag)
+		}
+		if deployment.GitSource.Commit != "" {
+			gitSource.Commit = types.StringValue(deployment.GitSource.Commit)
+		}
+		if deployment.GitSource.SourceCodePath != "" {
+			gitSource.SourceCodePath = types.StringValue(deployment.GitSource.SourceCodePath)
+		}
+		if deployment.GitSource.ResolvedCommit != "" {
+			gitSource.ResolvedCommit = types.StringValue(deployment.GitSource.ResolvedCommit)
+		}
+
+		// Populate git_repository if present
+		if deployment.GitSource.GitRepository != nil {
+			gitRepo := gitRepositoryModel{
+				Provider: types.StringValue(deployment.GitSource.GitRepository.Provider),
+				Url:      types.StringValue(deployment.GitSource.GitRepository.Url),
+			}
+			gitRepoObj, diags := types.ObjectValueFrom(ctx, gitRepositoryAttrTypes(), gitRepo)
+			if diags.HasError() {
+				resp.Diagnostics.Append(diags...)
+				return
+			}
+			gitSource.GitRepository = gitRepoObj
+		}
+
+		gitSourceObj, diags := types.ObjectValueFrom(ctx, gitSourceAttrTypes(), gitSource)
+		if diags.HasError() {
+			resp.Diagnostics.Append(diags...)
+			return
+		}
+		state.GitSource = gitSourceObj
+		state.SourceCodePath = types.StringNull()
+	}
+
 	state.CreateTime = types.StringValue(deployment.CreateTime)
 	if deployment.Mode != "" {
 		state.Mode = types.StringValue(string(deployment.Mode))
@@ -175,6 +404,24 @@ func (r *resourceAppDeployment) Read(ctx context.Context, req resource.ReadReque
 		state.Status = types.StringNull()
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+}
+
+func gitSourceAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"branch":           types.StringType,
+		"tag":              types.StringType,
+		"commit":           types.StringType,
+		"source_code_path": types.StringType,
+		"git_repository":   types.ObjectType{AttrTypes: gitRepositoryAttrTypes()},
+		"resolved_commit":  types.StringType,
+	}
+}
+
+func gitRepositoryAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"provider": types.StringType,
+		"url":      types.StringType,
+	}
 }
 
 func (r *resourceAppDeployment) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -202,3 +449,4 @@ func (r *resourceAppDeployment) ImportState(ctx context.Context, req resource.Im
 
 var _ resource.ResourceWithConfigure = &resourceAppDeployment{}
 var _ resource.ResourceWithImportState = &resourceAppDeployment{}
+var _ resource.ResourceWithValidateConfig = &resourceAppDeployment{}
