@@ -11,6 +11,7 @@
 ### Bug Fixes
 
 * [Fix] `databricks_app` resource fail to read app when deleted outside terraform ([#5365](https://github.com/databricks/terraform-provider-databricks/pull/5365))
+* [Fix] `databricks_app` resource to use `CreateUpdate` API for updating `git_repository` and other async-required fields ([#XXXX](https://github.com/databricks/terraform-provider-databricks/pull/XXXX))
 
 ### Documentation
 
