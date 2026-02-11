@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 )
 
 const resourceName = "genie_space"
@@ -34,7 +35,15 @@ func (r *GenieSpaceResource) Metadata(ctx context.Context, req resource.Metadata
 }
 
 func (r *GenieSpaceResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
-	attrs, blocks := tfschema.ResourceStructToSchemaMap(ctx, dashboards_tf.GenieSpace{}, nil)
+	attrs, blocks := tfschema.ResourceStructToSchemaMap(ctx, dashboards_tf.GenieSpace{}, func(c tfschema.CustomizableSchema) tfschema.CustomizableSchema {
+		c.SetReadOnly("space_id")
+		// Force replacement on any change since Update API is not supported
+		c.AddPlanModifier(stringplanmodifier.RequiresReplace(), "title")
+		c.AddPlanModifier(stringplanmodifier.RequiresReplace(), "description")
+		c.AddPlanModifier(stringplanmodifier.RequiresReplace(), "warehouse_id")
+		c.AddPlanModifier(stringplanmodifier.RequiresReplace(), "serialized_space")
+		return c
+	})
 	resp.Schema = schema.Schema{
 		Description: "Terraform resource for Databricks Genie Space. " +
 			"Genie provides a no-code experience for business users, powered by AI/BI. " +
@@ -83,6 +92,11 @@ func (r *GenieSpaceResource) Create(ctx context.Context, req resource.CreateRequ
 
 	newState.SyncFieldsDuringCreateOrUpdate(ctx, plan)
 
+	// Use the plan's serialized_space value since the API may reformat/reorder JSON.
+	// This ensures Terraform state matches the planned value to avoid "inconsistent result" errors.
+	// The actual content sent to the API is the same, just formatted differently.
+	newState.SerializedSpace = plan.SerializedSpace
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, newState)...)
 }
 
@@ -122,6 +136,10 @@ func (r *GenieSpaceResource) Read(ctx context.Context, req resource.ReadRequest,
 	}
 
 	newState.SyncFieldsDuringRead(ctx, existingState)
+
+	// Preserve serialized_space from state since the API may reformat/reorder JSON.
+	// With RequiresReplace on this field, any config change will still trigger a replace.
+	newState.SerializedSpace = existingState.SerializedSpace
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, newState)...)
 }
