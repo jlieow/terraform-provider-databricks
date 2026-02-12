@@ -48,7 +48,7 @@ The following arguments are required:
 * `resources` - (Optional) A list of resources that the app have access to.
 * `user_api_scopes` - (Optional) A list of api scopes granted to the user access token.
 * `compute_size` - (Optional) A string specifying compute size for the App. Possible values are `MEDIUM`, `LARGE`.
-* `compute` - (Optional) Controls the compute state of the app. Valid values are `ACTIVE` and `STOPPED`. When set to `STOPPED`, the app is created without compute allocated. Set to `ACTIVE` to start a stopped app. When omitted, the app defaults to running (`ACTIVE`).
+* `compute` - (Optional) Controls the compute state of the app. Valid values are `ACTIVE` and `STOPPED`. Defaults to `ACTIVE`. Set to `STOPPED` to create the app without compute or to stop a running app. Set to `ACTIVE` to start a stopped app.
 
 ### resources Configuration Attribute
 

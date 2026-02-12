@@ -21,6 +21,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -30,6 +31,31 @@ const (
 	resourceNamePlural = "apps"
 )
 
+// stringDefaultValue returns a plan modifier that sets a default string value
+// when the config value is null.
+func stringDefaultValue(val string) planmodifier.String {
+	return &stringDefault{defaultValue: val}
+}
+
+type stringDefault struct {
+	defaultValue string
+}
+
+func (d *stringDefault) Description(ctx context.Context) string {
+	return fmt.Sprintf("defaults to %q if not set", d.defaultValue)
+}
+
+func (d *stringDefault) MarkdownDescription(ctx context.Context) string {
+	return d.Description(ctx)
+}
+
+func (d *stringDefault) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if !req.ConfigValue.IsNull() {
+		return
+	}
+	resp.PlanValue = types.StringValue(d.defaultValue)
+}
+
 type AppResource struct {
 	apps_tf.App
 	Compute types.String `tfsdk:"compute"`
@@ -37,7 +63,7 @@ type AppResource struct {
 }
 
 func (a AppResource) ApplySchemaCustomizations(s map[string]tfschema.AttributeBuilder) map[string]tfschema.AttributeBuilder {
-	s["compute"] = s["compute"].SetOptional()
+	s["compute"] = s["compute"].SetOptional().SetComputed()
 	s["provider_config"] = s["provider_config"].SetOptional()
 	s["compute_size"] = s["compute_size"].SetComputed()
 	s = apps_tf.App{}.ApplySchemaCustomizations(s)
@@ -92,6 +118,7 @@ func (a resourceApp) Schema(ctx context.Context, req resource.SchemaRequest, res
 		}
 		cs.AddPlanModifier(int64planmodifier.UseStateForUnknown(), "service_principal_id")
 		cs.AddValidator(stringvalidator.OneOf("ACTIVE", "STOPPED"), "compute")
+		cs.AddPlanModifier(stringDefaultValue("ACTIVE"), "compute")
 		return cs
 	})
 }
@@ -131,14 +158,10 @@ func (a *resourceApp) Create(ctx context.Context, req resource.CreateRequest, re
 
 	// Create the app. Map compute="STOPPED" to NoCompute=true on the SDK request.
 	noCompute := !shouldBeRunning(app.Compute)
-	var forceSendFields []string
-	if !app.Compute.IsNull() {
-		forceSendFields = append(forceSendFields, "NoCompute")
-	}
 	waiter, err := w.Apps.Create(ctx, apps.CreateAppRequest{
 		App:             appGoSdk,
 		NoCompute:       noCompute,
-		ForceSendFields: forceSendFields,
+		ForceSendFields: []string{"NoCompute"},
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create app", err.Error())
@@ -215,9 +238,9 @@ func (a *resourceApp) waitForApp(ctx context.Context, w *databricks.WorkspaceCli
 }
 
 // shouldBeRunning returns true if the app should be in ACTIVE state.
-// null (omitted) and "ACTIVE" mean running; only "STOPPED" means stopped.
+// Defaults to true when the value is null (e.g. during import).
 func shouldBeRunning(s types.String) bool {
-	return s.IsNull() || s.ValueString() != "STOPPED"
+	return s.IsNull() || s.ValueString() == "ACTIVE"
 }
 
 func (a *resourceApp) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
