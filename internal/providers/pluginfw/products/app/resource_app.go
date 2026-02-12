@@ -211,6 +211,12 @@ func (a *resourceApp) waitForApp(ctx context.Context, w *databricks.WorkspaceCli
 	})
 }
 
+// shouldBeRunning returns true if the app should be in ACTIVE state.
+// null and false both mean "running"; only true means "stopped".
+func shouldBeRunning(b types.Bool) bool {
+	return b.IsNull() || !b.ValueBool()
+}
+
 func (a *resourceApp) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	ctx = pluginfwcontext.SetUserAgentInResourceContext(ctx, resourceName)
 
@@ -264,6 +270,12 @@ func (a *resourceApp) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
+	var oldApp AppResource
+	resp.Diagnostics.Append(req.State.Get(ctx, &oldApp)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	workspaceID, diags := tfschema.GetWorkspaceIDResource(ctx, app.ProviderConfig)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -294,9 +306,51 @@ func (a *resourceApp) Update(ctx context.Context, req resource.UpdateRequest, re
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	// Modifying no_compute after creation has no effect.
 	newApp.NoCompute = app.NoCompute
 	newApp.ProviderConfig = app.ProviderConfig
+
+	// Handle start/stop based on no_compute changes
+	wasRunning := shouldBeRunning(oldApp.NoCompute)
+	wantRunning := shouldBeRunning(app.NoCompute)
+
+	if wasRunning && !wantRunning {
+		// Stop the app
+		_, err := w.Apps.Stop(ctx, apps.StopAppRequest{Name: app.Name.ValueString()})
+		if err != nil {
+			resp.Diagnostics.AddError("failed to stop app", err.Error())
+			return
+		}
+		finalApp, err := a.waitForApp(ctx, w, app.Name.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("error waiting for app to stop", err.Error())
+			return
+		}
+		resp.Diagnostics.Append(converters.GoSdkToTfSdkStruct(ctx, finalApp, &newApp)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		newApp.NoCompute = app.NoCompute
+		newApp.ProviderConfig = app.ProviderConfig
+	} else if !wasRunning && wantRunning {
+		// Start the app
+		_, err := w.Apps.Start(ctx, apps.StartAppRequest{Name: app.Name.ValueString()})
+		if err != nil {
+			resp.Diagnostics.AddError("failed to start app", err.Error())
+			return
+		}
+		finalApp, err := a.waitForApp(ctx, w, app.Name.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("error waiting for app to start", err.Error())
+			return
+		}
+		resp.Diagnostics.Append(converters.GoSdkToTfSdkStruct(ctx, finalApp, &newApp)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		newApp.NoCompute = app.NoCompute
+		newApp.ProviderConfig = app.ProviderConfig
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, newApp)...)
 	if resp.Diagnostics.HasError() {
 		return

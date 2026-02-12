@@ -193,6 +193,73 @@ func TestAccAppResource_NoCompute(t *testing.T) {
 	})
 }
 
+var startStopBaseTemplate = `
+	resource "databricks_secret_scope" "this" {
+		name = "tf-{var.STICKY_RANDOM}"
+	}
+
+	resource "databricks_secret" "this" {
+	    scope = databricks_secret_scope.this.name
+		key = "tf-{var.STICKY_RANDOM}"
+		string_value = "secret"
+	}
+`
+
+func startStopAppTemplate(noCompute string) string {
+	return startStopBaseTemplate + fmt.Sprintf(`
+	resource "databricks_app" "this" {
+		name = "tf-{var.STICKY_RANDOM}"
+		%s
+		description = "start stop test"
+		resources = [{
+			name = "secret"
+			description = "secret for app"
+			secret = {
+				scope = databricks_secret_scope.this.name
+				key = databricks_secret.this.key
+				permission = "MANAGE"
+			}
+		}]
+	}
+`, noCompute)
+}
+
+func TestAccAppResource_StartStop(t *testing.T) {
+	acceptance.LoadWorkspaceEnv(t)
+	if acceptance.IsGcp(t) {
+		acceptance.Skipf(t)("not available on GCP")
+	}
+	acceptance.WorkspaceLevel(t,
+		// Step 1: Create a running app (no_compute omitted)
+		acceptance.Step{
+			Template: startStopAppTemplate(""),
+			Check: func(s *terraform.State) error {
+				state := s.RootModule().Resources["databricks_app.this"].Primary.Attributes["compute_status.state"]
+				assert.Equal(t, "ACTIVE", state)
+				return nil
+			},
+		},
+		// Step 2: Stop the app by setting no_compute = true
+		acceptance.Step{
+			Template: startStopAppTemplate("no_compute = true"),
+			Check: func(s *terraform.State) error {
+				state := s.RootModule().Resources["databricks_app.this"].Primary.Attributes["compute_status.state"]
+				assert.Equal(t, "STOPPED", state)
+				return nil
+			},
+		},
+		// Step 3: Start the app again by removing no_compute
+		acceptance.Step{
+			Template: startStopAppTemplate(""),
+			Check: func(s *terraform.State) error {
+				state := s.RootModule().Resources["databricks_app.this"].Primary.Attributes["compute_status.state"]
+				assert.Equal(t, "ACTIVE", state)
+				return nil
+			},
+		},
+	)
+}
+
 var deletedOutsideTemplate = `
 	resource "databricks_secret_scope" "this" {
 		name = "tf-{var.STICKY_RANDOM}"
