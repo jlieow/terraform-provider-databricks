@@ -17,6 +17,7 @@ import (
 	"github.com/databricks/terraform-provider-databricks/internal/providers/pluginfw/tfschema"
 	"github.com/databricks/terraform-provider-databricks/internal/service/apps_tf"
 	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
@@ -31,12 +32,12 @@ const (
 
 type AppResource struct {
 	apps_tf.App
-	NoCompute types.Bool `tfsdk:"no_compute"`
+	Compute types.String `tfsdk:"compute"`
 	tfschema.Namespace
 }
 
 func (a AppResource) ApplySchemaCustomizations(s map[string]tfschema.AttributeBuilder) map[string]tfschema.AttributeBuilder {
-	s["no_compute"] = s["no_compute"].SetOptional()
+	s["compute"] = s["compute"].SetOptional()
 	s["provider_config"] = s["provider_config"].SetOptional()
 	s["compute_size"] = s["compute_size"].SetComputed()
 	s = apps_tf.App{}.ApplySchemaCustomizations(s)
@@ -90,6 +91,7 @@ func (a resourceApp) Schema(ctx context.Context, req resource.SchemaRequest, res
 			cs.AddPlanModifier(stringplanmodifier.UseStateForUnknown(), field)
 		}
 		cs.AddPlanModifier(int64planmodifier.UseStateForUnknown(), "service_principal_id")
+		cs.AddValidator(stringvalidator.OneOf("ACTIVE", "STOPPED"), "compute")
 		return cs
 	})
 }
@@ -127,14 +129,15 @@ func (a *resourceApp) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
-	// Create the app
+	// Create the app. Map compute="STOPPED" to NoCompute=true on the SDK request.
+	noCompute := !shouldBeRunning(app.Compute)
 	var forceSendFields []string
-	if !app.NoCompute.IsNull() {
+	if !app.Compute.IsNull() {
 		forceSendFields = append(forceSendFields, "NoCompute")
 	}
 	waiter, err := w.Apps.Create(ctx, apps.CreateAppRequest{
 		App:             appGoSdk,
-		NoCompute:       app.NoCompute.ValueBool(),
+		NoCompute:       noCompute,
 		ForceSendFields: forceSendFields,
 	})
 	if err != nil {
@@ -148,14 +151,14 @@ func (a *resourceApp) Create(ctx context.Context, req resource.CreateRequest, re
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	newApp.NoCompute = app.NoCompute
+	newApp.Compute = app.Compute
 	newApp.ProviderConfig = app.ProviderConfig
 	resp.Diagnostics.Append(resp.State.Set(ctx, newApp)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Wait for the app to be created. If no_compute is specified, the terminal state is
+	// Wait for the app to be created. If compute is "STOPPED", the terminal state is
 	// STOPPED, otherwise it is ACTIVE.
 	finalApp, err := a.waitForApp(ctx, w, appGoSdk.Name)
 	if err != nil {
@@ -212,9 +215,9 @@ func (a *resourceApp) waitForApp(ctx context.Context, w *databricks.WorkspaceCli
 }
 
 // shouldBeRunning returns true if the app should be in ACTIVE state.
-// null and false both mean "running"; only true means "stopped".
-func shouldBeRunning(b types.Bool) bool {
-	return b.IsNull() || !b.ValueBool()
+// null (omitted) and "ACTIVE" mean running; only "STOPPED" means stopped.
+func shouldBeRunning(s types.String) bool {
+	return s.IsNull() || s.ValueString() != "STOPPED"
 }
 
 func (a *resourceApp) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -253,7 +256,7 @@ func (a *resourceApp) Read(ctx context.Context, req resource.ReadRequest, resp *
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	newApp.NoCompute = app.NoCompute
+	newApp.Compute = app.Compute
 	newApp.ProviderConfig = app.ProviderConfig
 	resp.Diagnostics.Append(resp.State.Set(ctx, newApp)...)
 	if resp.Diagnostics.HasError() {
@@ -306,12 +309,12 @@ func (a *resourceApp) Update(ctx context.Context, req resource.UpdateRequest, re
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	newApp.NoCompute = app.NoCompute
+	newApp.Compute = app.Compute
 	newApp.ProviderConfig = app.ProviderConfig
 
-	// Handle start/stop based on no_compute changes
-	wasRunning := shouldBeRunning(oldApp.NoCompute)
-	wantRunning := shouldBeRunning(app.NoCompute)
+	// Handle start/stop based on compute changes
+	wasRunning := shouldBeRunning(oldApp.Compute)
+	wantRunning := shouldBeRunning(app.Compute)
 
 	if wasRunning && !wantRunning {
 		// Stop the app
@@ -329,7 +332,7 @@ func (a *resourceApp) Update(ctx context.Context, req resource.UpdateRequest, re
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		newApp.NoCompute = app.NoCompute
+		newApp.Compute = app.Compute
 		newApp.ProviderConfig = app.ProviderConfig
 	} else if !wasRunning && wantRunning {
 		// Start the app
@@ -347,7 +350,7 @@ func (a *resourceApp) Update(ctx context.Context, req resource.UpdateRequest, re
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		newApp.NoCompute = app.NoCompute
+		newApp.Compute = app.Compute
 		newApp.ProviderConfig = app.ProviderConfig
 	}
 

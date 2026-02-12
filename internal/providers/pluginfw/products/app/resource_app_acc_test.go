@@ -154,7 +154,7 @@ func TestAccAppResource(t *testing.T) {
 	})
 }
 
-func TestAccAppResource_NoCompute(t *testing.T) {
+func TestAccAppResource_ComputeStopped(t *testing.T) {
 	acceptance.LoadWorkspaceEnv(t)
 	if acceptance.IsGcp(t) {
 		acceptance.Skipf(t)("not available on GCP")
@@ -171,9 +171,9 @@ func TestAccAppResource_NoCompute(t *testing.T) {
 		string_value = "secret"
 	}
 	resource "databricks_app" "this" {
-		no_compute = true
+		compute = "STOPPED"
 		name = "tf-{var.STICKY_RANDOM}"
-		description = "no_compute app"
+		description = "stopped compute app"
 		resources = [{
 			name = "secret"
 			description = "secret for app"
@@ -205,7 +205,7 @@ var startStopBaseTemplate = `
 	}
 `
 
-func startStopAppTemplate(noCompute string) string {
+func startStopAppTemplate(computeAttr string) string {
 	return startStopBaseTemplate + fmt.Sprintf(`
 	resource "databricks_app" "this" {
 		name = "tf-{var.STICKY_RANDOM}"
@@ -221,7 +221,7 @@ func startStopAppTemplate(noCompute string) string {
 			}
 		}]
 	}
-`, noCompute)
+`, computeAttr)
 }
 
 func TestAccAppResource_StartStop(t *testing.T) {
@@ -230,7 +230,7 @@ func TestAccAppResource_StartStop(t *testing.T) {
 		acceptance.Skipf(t)("not available on GCP")
 	}
 	acceptance.WorkspaceLevel(t,
-		// Step 1: Create a running app (no_compute omitted)
+		// Step 1: Create a running app (compute omitted, defaults to ACTIVE)
 		acceptance.Step{
 			Template: startStopAppTemplate(""),
 			Check: func(s *terraform.State) error {
@@ -239,18 +239,18 @@ func TestAccAppResource_StartStop(t *testing.T) {
 				return nil
 			},
 		},
-		// Step 2: Stop the app by setting no_compute = true
+		// Step 2: Stop the app by setting compute = "STOPPED"
 		acceptance.Step{
-			Template: startStopAppTemplate("no_compute = true"),
+			Template: startStopAppTemplate(`compute = "STOPPED"`),
 			Check: func(s *terraform.State) error {
 				state := s.RootModule().Resources["databricks_app.this"].Primary.Attributes["compute_status.state"]
 				assert.Equal(t, "STOPPED", state)
 				return nil
 			},
 		},
-		// Step 3: Start the app again by removing no_compute
+		// Step 3: Start the app again by setting compute = "ACTIVE"
 		acceptance.Step{
-			Template: startStopAppTemplate(""),
+			Template: startStopAppTemplate(`compute = "ACTIVE"`),
 			Check: func(s *terraform.State) error {
 				state := s.RootModule().Resources["databricks_app.this"].Primary.Attributes["compute_status.state"]
 				assert.Equal(t, "ACTIVE", state)
@@ -272,7 +272,7 @@ var deletedOutsideTemplate = `
 	}
 
 	resource "databricks_app" "this" {
-		no_compute = true
+		compute = "STOPPED"
 		name = "tf-{var.STICKY_RANDOM}"
 		description = "deleted outside terraform test"
 		resources = [{
@@ -331,9 +331,9 @@ func appTemplate(provider_config string) string {
 	}
 	resource "databricks_app" "this" {
 		%s
-		no_compute = true
+		compute = "STOPPED"
 		name = "tf-{var.STICKY_RANDOM}"
-		description = "no_compute app"
+		description = "stopped compute app"
 		resources = [{
 			name = "secret"
 			description = "secret for app"
