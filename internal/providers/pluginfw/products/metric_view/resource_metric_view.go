@@ -130,7 +130,7 @@ func (r *metricViewResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	stmt := fmt.Sprintf("CREATE METRIC VIEW %s AS\n%s;", plan.sqlFullName(), plan.YamlSpecification.ValueString())
+	stmt := fmt.Sprintf("CREATE VIEW %s WITH METRICS LANGUAGE YAML AS $$\n%s\n$$;", plan.sqlFullName(), plan.YamlSpecification.ValueString())
 	err := r.executeSql(ctx, plan.WarehouseId.ValueString(), plan.ProviderConfig, stmt)
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create metric view", err.Error())
@@ -150,7 +150,7 @@ func (r *metricViewResource) Read(ctx context.Context, req resource.ReadRequest,
 		return
 	}
 
-	stmt := fmt.Sprintf("DESCRIBE EXTENDED %s;", state.sqlFullName())
+	stmt := fmt.Sprintf("DESCRIBE %s;", state.sqlFullName())
 	err := r.executeSql(ctx, state.WarehouseId.ValueString(), state.ProviderConfig, stmt)
 	if err != nil {
 		if apierr.IsMissing(err) {
@@ -178,7 +178,7 @@ func (r *metricViewResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
-	stmt := fmt.Sprintf("CREATE OR REPLACE METRIC VIEW %s AS\n%s;", plan.sqlFullName(), plan.YamlSpecification.ValueString())
+	stmt := fmt.Sprintf("CREATE OR REPLACE VIEW %s WITH METRICS LANGUAGE YAML AS $$\n%s\n$$;", plan.sqlFullName(), plan.YamlSpecification.ValueString())
 	err := r.executeSql(ctx, plan.WarehouseId.ValueString(), plan.ProviderConfig, stmt)
 	if err != nil {
 		resp.Diagnostics.AddError("failed to update metric view", err.Error())
@@ -197,7 +197,7 @@ func (r *metricViewResource) Delete(ctx context.Context, req resource.DeleteRequ
 		return
 	}
 
-	stmt := fmt.Sprintf("DROP METRIC VIEW IF EXISTS %s;", state.sqlFullName())
+	stmt := fmt.Sprintf("DROP VIEW IF EXISTS %s;", state.sqlFullName())
 	err := r.executeSql(ctx, state.WarehouseId.ValueString(), state.ProviderConfig, stmt)
 	if err != nil {
 		if apierr.IsMissing(err) {
