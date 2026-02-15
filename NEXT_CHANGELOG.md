@@ -6,6 +6,8 @@
 
 ### New Features and Improvements
 
+* Added `databricks_metric_view` resource to manage Unity Catalog metric views via SQL statements ([#XXXX](https://github.com/databricks/terraform-provider-databricks/pull/XXXX)).
+
 ### Bug Fixes
 
 ### Documentation
