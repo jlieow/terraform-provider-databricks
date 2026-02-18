@@ -2085,3 +2085,208 @@ func TestResourceClusterAliasAutoNoDrift_DataSecurityMode(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, d.HasChanges("data_security_mode"))
 }
+
+func TestResourceClusterUpdate_PreservesUnconfiguredSparkEnvVars(t *testing.T) {
+	_, err := qa.ResourceFixture{
+		Fixtures: []qa.HTTPFixture{
+			nothingPinned,
+			{
+				Method:       "GET",
+				Resource:     "/api/2.1/clusters/get?cluster_id=abc",
+				ReuseRequest: true,
+				Response: compute.ClusterDetails{
+					ClusterId:              "abc",
+					NumWorkers:             100,
+					ClusterName:            "Shared Autoscaling",
+					SparkVersion:           "7.1-scala12",
+					NodeTypeId:             "i3.xlarge",
+					AutoterminationMinutes: 15,
+					State:                  compute.StateRunning,
+					SparkEnvVars: map[string]string{
+						"PYSPARK_PYTHON": "/databricks/python3/bin/python3",
+					},
+				},
+			},
+			{
+				Method:   "POST",
+				Resource: "/api/2.1/clusters/edit",
+				ExpectedRequest: compute.EditCluster{
+					AutoterminationMinutes: 15,
+					ClusterId:              "abc",
+					NumWorkers:             100,
+					ClusterName:            "Shared Autoscaling",
+					SparkVersion:           "7.1-scala12",
+					NodeTypeId:             "i3.xlarge",
+					SparkEnvVars: map[string]string{
+						"PYSPARK_PYTHON": "/databricks/python3/bin/python3",
+					},
+				},
+			},
+			{
+				Method:   "POST",
+				Resource: "/api/2.1/clusters/start",
+				ExpectedRequest: compute.StartCluster{
+					ClusterId: "abc",
+				},
+			},
+			{
+				Method:   "GET",
+				Resource: "/api/2.0/libraries/cluster-status?cluster_id=abc",
+				Response: compute.ClusterLibraryStatuses{
+					LibraryStatuses: []compute.LibraryFullStatus{},
+				},
+			},
+		},
+		ID:       "abc",
+		Update:   true,
+		Resource: ResourceCluster(),
+		State: map[string]any{
+			"autotermination_minutes": 15,
+			"cluster_name":            "Shared Autoscaling",
+			"spark_version":           "7.1-scala12",
+			"node_type_id":            "i3.xlarge",
+			"num_workers":             100,
+		},
+	}.Apply(t)
+	assert.NoError(t, err)
+}
+
+func TestResourceClusterUpdate_PreservesUnconfiguredSparkConfAndCustomTags(t *testing.T) {
+	_, err := qa.ResourceFixture{
+		Fixtures: []qa.HTTPFixture{
+			nothingPinned,
+			{
+				Method:       "GET",
+				Resource:     "/api/2.1/clusters/get?cluster_id=abc",
+				ReuseRequest: true,
+				Response: compute.ClusterDetails{
+					ClusterId:              "abc",
+					NumWorkers:             100,
+					ClusterName:            "Shared Autoscaling",
+					SparkVersion:           "7.1-scala12",
+					NodeTypeId:             "i3.xlarge",
+					AutoterminationMinutes: 15,
+					State:                  compute.StateRunning,
+					SparkConf: map[string]string{
+						"spark.speculation": "true",
+					},
+					CustomTags: map[string]string{
+						"Department": "Engineering",
+					},
+				},
+			},
+			{
+				Method:   "POST",
+				Resource: "/api/2.1/clusters/edit",
+				ExpectedRequest: compute.EditCluster{
+					AutoterminationMinutes: 15,
+					ClusterId:              "abc",
+					NumWorkers:             100,
+					ClusterName:            "Shared Autoscaling",
+					SparkVersion:           "7.1-scala12",
+					NodeTypeId:             "i3.xlarge",
+					SparkConf: map[string]string{
+						"spark.speculation": "true",
+					},
+					CustomTags: map[string]string{
+						"Department": "Engineering",
+					},
+				},
+			},
+			{
+				Method:   "POST",
+				Resource: "/api/2.1/clusters/start",
+				ExpectedRequest: compute.StartCluster{
+					ClusterId: "abc",
+				},
+			},
+			{
+				Method:   "GET",
+				Resource: "/api/2.0/libraries/cluster-status?cluster_id=abc",
+				Response: compute.ClusterLibraryStatuses{
+					LibraryStatuses: []compute.LibraryFullStatus{},
+				},
+			},
+		},
+		ID:       "abc",
+		Update:   true,
+		Resource: ResourceCluster(),
+		State: map[string]any{
+			"autotermination_minutes": 15,
+			"cluster_name":            "Shared Autoscaling",
+			"spark_version":           "7.1-scala12",
+			"node_type_id":            "i3.xlarge",
+			"num_workers":             100,
+		},
+	}.Apply(t)
+	assert.NoError(t, err)
+}
+
+func TestResourceClusterUpdate_DoesNotOverrideConfiguredSparkEnvVars(t *testing.T) {
+	_, err := qa.ResourceFixture{
+		Fixtures: []qa.HTTPFixture{
+			nothingPinned,
+			{
+				Method:       "GET",
+				Resource:     "/api/2.1/clusters/get?cluster_id=abc",
+				ReuseRequest: true,
+				Response: compute.ClusterDetails{
+					ClusterId:              "abc",
+					NumWorkers:             100,
+					ClusterName:            "Shared Autoscaling",
+					SparkVersion:           "7.1-scala12",
+					NodeTypeId:             "i3.xlarge",
+					AutoterminationMinutes: 15,
+					State:                  compute.StateRunning,
+					SparkEnvVars: map[string]string{
+						"PYSPARK_PYTHON": "/databricks/python3/bin/python3",
+						"OTHER_VAR":      "server_value",
+					},
+				},
+			},
+			{
+				Method:   "POST",
+				Resource: "/api/2.1/clusters/edit",
+				ExpectedRequest: compute.EditCluster{
+					AutoterminationMinutes: 15,
+					ClusterId:              "abc",
+					NumWorkers:             100,
+					ClusterName:            "Shared Autoscaling",
+					SparkVersion:           "7.1-scala12",
+					NodeTypeId:             "i3.xlarge",
+					SparkEnvVars: map[string]string{
+						"PYSPARK_PYTHON": "/usr/bin/python3",
+					},
+				},
+			},
+			{
+				Method:   "POST",
+				Resource: "/api/2.1/clusters/start",
+				ExpectedRequest: compute.StartCluster{
+					ClusterId: "abc",
+				},
+			},
+			{
+				Method:   "GET",
+				Resource: "/api/2.0/libraries/cluster-status?cluster_id=abc",
+				Response: compute.ClusterLibraryStatuses{
+					LibraryStatuses: []compute.LibraryFullStatus{},
+				},
+			},
+		},
+		ID:       "abc",
+		Update:   true,
+		Resource: ResourceCluster(),
+		State: map[string]any{
+			"autotermination_minutes": 15,
+			"cluster_name":            "Shared Autoscaling",
+			"spark_version":           "7.1-scala12",
+			"node_type_id":            "i3.xlarge",
+			"num_workers":             100,
+			"spark_env_vars": map[string]any{
+				"PYSPARK_PYTHON": "/usr/bin/python3",
+			},
+		},
+	}.Apply(t)
+	assert.NoError(t, err)
+}
