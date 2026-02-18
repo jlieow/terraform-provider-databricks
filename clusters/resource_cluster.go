@@ -619,6 +619,20 @@ func resourceClusterUpdate(ctx context.Context, d *schema.ResourceData, c *commo
 				Autoscale: cluster.Autoscale,
 			})
 		} else {
+			// Preserve server-side map fields that the user did not configure in HCL.
+			// The Edit API is a full replacement — omitted fields are cleared. Without
+			// this, unconfigured maps like spark_env_vars set outside of Terraform
+			// (e.g. by cluster policies or manual changes) would be silently wiped.
+			if _, ok := d.GetOk("spark_env_vars"); !ok && len(clusterInfo.SparkEnvVars) > 0 {
+				cluster.SparkEnvVars = clusterInfo.SparkEnvVars
+			}
+			if _, ok := d.GetOk("spark_conf"); !ok && len(clusterInfo.SparkConf) > 0 {
+				cluster.SparkConf = clusterInfo.SparkConf
+			}
+			if _, ok := d.GetOk("custom_tags"); !ok && len(clusterInfo.CustomTags) > 0 {
+				cluster.CustomTags = clusterInfo.CustomTags
+			}
+
 			SetForceSendFieldsForCluster(&cluster, d)
 
 			err = retry.RetryContext(ctx, 15*time.Minute, func() *retry.RetryError {
