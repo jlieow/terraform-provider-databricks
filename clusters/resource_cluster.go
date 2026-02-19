@@ -523,6 +523,16 @@ func resourceClusterRead(ctx context.Context, d *schema.ResourceData, c *common.
 	}, clusterSchema, d)
 }
 
+// isFieldNullInConfig returns true if the field is not present in the user's HCL
+// config (null in raw config). Returns true if raw config is unavailable (e.g. in
+// unit tests), falling back to the safe default of preserving server-side values.
+func isFieldNullInConfig(rawConfig cty.Value, field string) bool {
+	if rawConfig.IsNull() || !rawConfig.IsKnown() {
+		return true
+	}
+	return rawConfig.GetAttr(field).IsNull()
+}
+
 func hasClusterConfigChanged(d *schema.ResourceData) bool {
 	for k := range clusterSchema {
 		// TODO: create a map if we'll add more non-cluster config parameters in the future
@@ -623,13 +633,16 @@ func resourceClusterUpdate(ctx context.Context, d *schema.ResourceData, c *commo
 			// The Edit API is a full replacement — omitted fields are cleared. Without
 			// this, unconfigured maps like spark_env_vars set outside of Terraform
 			// (e.g. by cluster policies or manual changes) would be silently wiped.
-			if _, ok := d.GetOk("spark_env_vars"); !ok && len(clusterInfo.SparkEnvVars) > 0 {
+			// We use GetRawConfig instead of GetOk because GetOk returns false for
+			// both "not configured" and "configured as {}" (empty map equals TypeMap zero).
+			rawConfig := d.GetRawConfig()
+			if isFieldNullInConfig(rawConfig, "spark_env_vars") && len(clusterInfo.SparkEnvVars) > 0 {
 				cluster.SparkEnvVars = clusterInfo.SparkEnvVars
 			}
-			if _, ok := d.GetOk("spark_conf"); !ok && len(clusterInfo.SparkConf) > 0 {
+			if isFieldNullInConfig(rawConfig, "spark_conf") && len(clusterInfo.SparkConf) > 0 {
 				cluster.SparkConf = clusterInfo.SparkConf
 			}
-			if _, ok := d.GetOk("custom_tags"); !ok && len(clusterInfo.CustomTags) > 0 {
+			if isFieldNullInConfig(rawConfig, "custom_tags") && len(clusterInfo.CustomTags) > 0 {
 				cluster.CustomTags = clusterInfo.CustomTags
 			}
 
