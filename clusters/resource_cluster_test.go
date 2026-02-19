@@ -13,6 +13,7 @@ import (
 
 	"github.com/databricks/databricks-sdk-go/service/compute"
 
+	"github.com/databricks/terraform-provider-databricks/common"
 	"github.com/databricks/terraform-provider-databricks/qa"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -2084,4 +2085,280 @@ func TestResourceClusterAliasAutoNoDrift_DataSecurityMode(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.False(t, d.HasChanges("data_security_mode"))
+}
+
+func TestResourceClusterUpdate_ClearSparkEnvVars(t *testing.T) {
+	d, err := qa.ResourceFixture{
+		Fixtures: []qa.HTTPFixture{
+			nothingPinned,
+			{
+				Method:       "GET",
+				ReuseRequest: true,
+				Resource:     "/api/2.1/clusters/get?cluster_id=abc",
+				Response: compute.ClusterDetails{
+					ClusterId:              "abc",
+					NumWorkers:             100,
+					ClusterName:            "Shared Autoscaling",
+					SparkVersion:           "7.1-scala12",
+					NodeTypeId:             "i3.xlarge",
+					AutoterminationMinutes: 15,
+					State:                  compute.StateRunning,
+				},
+			},
+			{
+				Method:   "POST",
+				Resource: "/api/2.1/clusters/edit",
+				Response: compute.ClusterDetails{
+					ClusterId: "abc",
+					State:     compute.StateRunning,
+				},
+			},
+			{
+				Method:   "GET",
+				Resource: "/api/2.0/libraries/cluster-status?cluster_id=abc",
+				Response: compute.ClusterLibraryStatuses{
+					LibraryStatuses: []compute.LibraryFullStatus{},
+				},
+			},
+		},
+		Update:   true,
+		ID:       "abc",
+		Resource: ResourceCluster(),
+		InstanceState: map[string]string{
+			"autotermination_minutes": "15",
+			"cluster_name":            "Shared Autoscaling",
+			"spark_version":           "7.1-scala12",
+			"node_type_id":            "i3.xlarge",
+			"num_workers":             "100",
+			"spark_env_vars.%":        "1",
+			"spark_env_vars.FOO":      "bar",
+		},
+		State: map[string]any{
+			"autotermination_minutes": 15,
+			"cluster_name":            "Shared Autoscaling",
+			"spark_version":           "7.1-scala12",
+			"node_type_id":            "i3.xlarge",
+			"num_workers":             100,
+			"spark_env_vars":          map[string]any{},
+		},
+	}.Apply(t)
+	require.NoError(t, err)
+
+	var cluster compute.EditCluster
+	common.DataToStructPointer(d, clusterSchema, &cluster)
+	SetForceSendFieldsForCluster(&cluster, d)
+
+	assert.NotNil(t, cluster.SparkEnvVars,
+		"SparkEnvVars should be an empty map, not nil")
+	assert.Empty(t, cluster.SparkEnvVars,
+		"SparkEnvVars should be empty")
+	assert.Contains(t, cluster.ForceSendFields, "SparkEnvVars",
+		"SparkEnvVars should be in ForceSendFields to send empty map to API")
+}
+
+func TestResourceClusterUpdate_ClearSparkConf(t *testing.T) {
+	d, err := qa.ResourceFixture{
+		Fixtures: []qa.HTTPFixture{
+			nothingPinned,
+			{
+				Method:       "GET",
+				ReuseRequest: true,
+				Resource:     "/api/2.1/clusters/get?cluster_id=abc",
+				Response: compute.ClusterDetails{
+					ClusterId:              "abc",
+					NumWorkers:             100,
+					ClusterName:            "Shared Autoscaling",
+					SparkVersion:           "7.1-scala12",
+					NodeTypeId:             "i3.xlarge",
+					AutoterminationMinutes: 15,
+					State:                  compute.StateRunning,
+				},
+			},
+			{
+				Method:   "POST",
+				Resource: "/api/2.1/clusters/edit",
+				Response: compute.ClusterDetails{
+					ClusterId: "abc",
+					State:     compute.StateRunning,
+				},
+			},
+			{
+				Method:   "GET",
+				Resource: "/api/2.0/libraries/cluster-status?cluster_id=abc",
+				Response: compute.ClusterLibraryStatuses{
+					LibraryStatuses: []compute.LibraryFullStatus{},
+				},
+			},
+		},
+		Update:   true,
+		ID:       "abc",
+		Resource: ResourceCluster(),
+		InstanceState: map[string]string{
+			"autotermination_minutes":      "15",
+			"cluster_name":                 "Shared Autoscaling",
+			"spark_version":                "7.1-scala12",
+			"node_type_id":                 "i3.xlarge",
+			"num_workers":                  "100",
+			"spark_conf.%":                 "1",
+			"spark_conf.spark.speculation": "true",
+		},
+		State: map[string]any{
+			"autotermination_minutes": 15,
+			"cluster_name":            "Shared Autoscaling",
+			"spark_version":           "7.1-scala12",
+			"node_type_id":            "i3.xlarge",
+			"num_workers":             100,
+			"spark_conf":              map[string]any{},
+		},
+	}.Apply(t)
+	require.NoError(t, err)
+
+	var cluster compute.EditCluster
+	common.DataToStructPointer(d, clusterSchema, &cluster)
+	SetForceSendFieldsForCluster(&cluster, d)
+
+	assert.NotNil(t, cluster.SparkConf,
+		"SparkConf should be an empty map, not nil")
+	assert.Empty(t, cluster.SparkConf,
+		"SparkConf should be empty")
+	assert.Contains(t, cluster.ForceSendFields, "SparkConf",
+		"SparkConf should be in ForceSendFields to send empty map to API")
+}
+
+func TestResourceClusterUpdate_NonEmptySparkEnvVarsUnaffected(t *testing.T) {
+	d, err := qa.ResourceFixture{
+		Fixtures: []qa.HTTPFixture{
+			nothingPinned,
+			{
+				Method:       "GET",
+				ReuseRequest: true,
+				Resource:     "/api/2.1/clusters/get?cluster_id=abc",
+				Response: compute.ClusterDetails{
+					ClusterId:              "abc",
+					NumWorkers:             100,
+					ClusterName:            "Shared Autoscaling",
+					SparkVersion:           "7.1-scala12",
+					NodeTypeId:             "i3.xlarge",
+					AutoterminationMinutes: 15,
+					SparkEnvVars:           map[string]string{"FOO": "baz"},
+					State:                  compute.StateRunning,
+				},
+			},
+			{
+				Method:   "POST",
+				Resource: "/api/2.1/clusters/edit",
+				Response: compute.ClusterDetails{
+					ClusterId: "abc",
+					State:     compute.StateRunning,
+				},
+			},
+			{
+				Method:   "GET",
+				Resource: "/api/2.0/libraries/cluster-status?cluster_id=abc",
+				Response: compute.ClusterLibraryStatuses{
+					LibraryStatuses: []compute.LibraryFullStatus{},
+				},
+			},
+		},
+		Update:   true,
+		ID:       "abc",
+		Resource: ResourceCluster(),
+		InstanceState: map[string]string{
+			"autotermination_minutes": "15",
+			"cluster_name":            "Shared Autoscaling",
+			"spark_version":           "7.1-scala12",
+			"node_type_id":            "i3.xlarge",
+			"num_workers":             "100",
+			"spark_env_vars.%":        "1",
+			"spark_env_vars.FOO":      "bar",
+		},
+		State: map[string]any{
+			"autotermination_minutes": 15,
+			"cluster_name":            "Shared Autoscaling",
+			"spark_version":           "7.1-scala12",
+			"node_type_id":            "i3.xlarge",
+			"num_workers":             100,
+			"spark_env_vars": map[string]any{
+				"FOO": "baz",
+			},
+		},
+	}.Apply(t)
+	require.NoError(t, err)
+
+	var cluster compute.EditCluster
+	common.DataToStructPointer(d, clusterSchema, &cluster)
+	SetForceSendFieldsForCluster(&cluster, d)
+
+	assert.Equal(t, map[string]string{"FOO": "baz"}, cluster.SparkEnvVars)
+	assert.NotContains(t, cluster.ForceSendFields, "SparkEnvVars",
+		"SparkEnvVars should NOT be in ForceSendFields when non-empty")
+}
+
+func TestResourceClusterUpdate_UnchangedSparkEnvVarsUnaffected(t *testing.T) {
+	d, err := qa.ResourceFixture{
+		Fixtures: []qa.HTTPFixture{
+			nothingPinned,
+			{
+				Method:       "GET",
+				ReuseRequest: true,
+				Resource:     "/api/2.1/clusters/get?cluster_id=abc",
+				Response: compute.ClusterDetails{
+					ClusterId:              "abc",
+					NumWorkers:             200,
+					ClusterName:            "Shared Autoscaling",
+					SparkVersion:           "7.1-scala12",
+					NodeTypeId:             "i3.xlarge",
+					AutoterminationMinutes: 15,
+					SparkEnvVars:           map[string]string{"FOO": "bar"},
+					State:                  compute.StateRunning,
+				},
+			},
+			{
+				Method:   "POST",
+				Resource: "/api/2.1/clusters/resize",
+				Response: compute.ClusterDetails{
+					ClusterId: "abc",
+					State:     compute.StateRunning,
+				},
+			},
+			{
+				Method:   "GET",
+				Resource: "/api/2.0/libraries/cluster-status?cluster_id=abc",
+				Response: compute.ClusterLibraryStatuses{
+					LibraryStatuses: []compute.LibraryFullStatus{},
+				},
+			},
+		},
+		Update:   true,
+		ID:       "abc",
+		Resource: ResourceCluster(),
+		InstanceState: map[string]string{
+			"autotermination_minutes": "15",
+			"cluster_name":            "Shared Autoscaling",
+			"spark_version":           "7.1-scala12",
+			"node_type_id":            "i3.xlarge",
+			"num_workers":             "100",
+			"spark_env_vars.%":        "1",
+			"spark_env_vars.FOO":      "bar",
+		},
+		State: map[string]any{
+			"autotermination_minutes": 15,
+			"cluster_name":            "Shared Autoscaling",
+			"spark_version":           "7.1-scala12",
+			"node_type_id":            "i3.xlarge",
+			"num_workers":             200,
+			"spark_env_vars": map[string]any{
+				"FOO": "bar",
+			},
+		},
+	}.Apply(t)
+	require.NoError(t, err)
+
+	var cluster compute.EditCluster
+	common.DataToStructPointer(d, clusterSchema, &cluster)
+	SetForceSendFieldsForCluster(&cluster, d)
+
+	assert.Equal(t, map[string]string{"FOO": "bar"}, cluster.SparkEnvVars)
+	assert.NotContains(t, cluster.ForceSendFields, "SparkEnvVars",
+		"SparkEnvVars should NOT be in ForceSendFields when unchanged")
 }

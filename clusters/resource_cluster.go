@@ -238,6 +238,33 @@ func FixInstancePoolChangeIfAny(d *schema.ResourceData, cluster any) error {
 	}
 }
 
+// clusterMapFields maps Terraform attribute names to Go struct field names
+// for map[string]string fields that users may want to explicitly set to empty.
+var clusterMapFields = map[string]string{
+	"spark_env_vars": "SparkEnvVars",
+	"spark_conf":     "SparkConf",
+	"custom_tags":    "CustomTags",
+}
+
+// setEmptyMapFieldsForCluster detects when a user has changed a map field to
+// empty (e.g. spark_env_vars = {}) and ensures the empty map is sent to the
+// API so that previously set values can be cleared. Without this, d.GetOk
+// returns false for empty maps and DataToStructPointer leaves them nil.
+func setEmptyMapFieldsForCluster(forceSendFields *[]string, setMapField func(string, map[string]string), d *schema.ResourceData) {
+	for tfName, goName := range clusterMapFields {
+		if !d.HasChange(tfName) {
+			continue
+		}
+		_, newValue := d.GetChange(tfName)
+		newMap, _ := newValue.(map[string]interface{})
+		if len(newMap) != 0 {
+			continue
+		}
+		setMapField(goName, map[string]string{})
+		*forceSendFields = append(*forceSendFields, goName)
+	}
+}
+
 func SetForceSendFieldsForCluster(cluster any, d *schema.ResourceData) error {
 	switch c := cluster.(type) {
 	case *compute.ClusterSpec:
@@ -245,7 +272,16 @@ func SetForceSendFieldsForCluster(cluster any, d *schema.ResourceData) error {
 		if c.Autoscale == nil {
 			c.ForceSendFields = append(c.ForceSendFields, "NumWorkers")
 		}
-		// Workload type is not relevant in jobs clusters.
+		setEmptyMapFieldsForCluster(&c.ForceSendFields, func(name string, m map[string]string) {
+			switch name {
+			case "SparkEnvVars":
+				c.SparkEnvVars = m
+			case "SparkConf":
+				c.SparkConf = m
+			case "CustomTags":
+				c.CustomTags = m
+			}
+		}, d)
 		return nil
 	case *compute.CreateCluster:
 		if c.Autoscale == nil {
@@ -256,6 +292,16 @@ func SetForceSendFieldsForCluster(cluster any, d *schema.ResourceData) error {
 		if c.WorkloadType != nil {
 			c.WorkloadType.Clients.ForceSendFields = []string{"Jobs", "Notebooks"}
 		}
+		setEmptyMapFieldsForCluster(&c.ForceSendFields, func(name string, m map[string]string) {
+			switch name {
+			case "SparkEnvVars":
+				c.SparkEnvVars = m
+			case "SparkConf":
+				c.SparkConf = m
+			case "CustomTags":
+				c.CustomTags = m
+			}
+		}, d)
 		return nil
 	case *compute.EditCluster:
 		if c.Autoscale == nil {
@@ -266,6 +312,16 @@ func SetForceSendFieldsForCluster(cluster any, d *schema.ResourceData) error {
 		if c.WorkloadType != nil {
 			c.WorkloadType.Clients.ForceSendFields = []string{"Jobs", "Notebooks"}
 		}
+		setEmptyMapFieldsForCluster(&c.ForceSendFields, func(name string, m map[string]string) {
+			switch name {
+			case "SparkEnvVars":
+				c.SparkEnvVars = m
+			case "SparkConf":
+				c.SparkConf = m
+			case "CustomTags":
+				c.CustomTags = m
+			}
+		}, d)
 		return nil
 	default:
 		return fmt.Errorf(unsupportedExceptCreateEditClusterSpecErr, cluster, "*", "*", "*")
