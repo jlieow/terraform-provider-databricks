@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"time"
 
@@ -276,7 +277,9 @@ func setServerMapFieldsForConfiguredEmptyMaps(d *schema.ResourceData, clusterInf
 // empty (e.g. spark_env_vars = {}) and ensures the empty map is sent to the
 // API so that previously set values can be cleared. Without this, d.GetOk
 // returns false for empty maps and DataToStructPointer leaves them nil.
-func setEmptyMapFieldsForCluster(forceSendFields *[]string, setMapField func(string, map[string]string), d *schema.ResourceData) {
+func setEmptyMapFieldsForCluster(cluster any, d *schema.ResourceData) {
+	rv := reflect.ValueOf(cluster).Elem()
+	fsf := rv.FieldByName("ForceSendFields")
 	for tfName, goName := range clusterMapFields {
 		if !d.HasChange(tfName) {
 			continue
@@ -286,68 +289,36 @@ func setEmptyMapFieldsForCluster(forceSendFields *[]string, setMapField func(str
 		if len(newMap) != 0 {
 			continue
 		}
-		setMapField(goName, map[string]string{})
-		*forceSendFields = append(*forceSendFields, goName)
+		rv.FieldByName(goName).Set(reflect.ValueOf(map[string]string{}))
+		fsf.Set(reflect.Append(fsf, reflect.ValueOf(goName)))
 	}
 }
 
 func SetForceSendFieldsForCluster(cluster any, d *schema.ResourceData) error {
 	switch c := cluster.(type) {
 	case *compute.ClusterSpec:
-		// Used in jobs.
 		if c.Autoscale == nil {
 			c.ForceSendFields = append(c.ForceSendFields, "NumWorkers")
 		}
-		setEmptyMapFieldsForCluster(&c.ForceSendFields, func(name string, m map[string]string) {
-			switch name {
-			case "SparkEnvVars":
-				c.SparkEnvVars = m
-			case "SparkConf":
-				c.SparkConf = m
-			case "CustomTags":
-				c.CustomTags = m
-			}
-		}, d)
+		setEmptyMapFieldsForCluster(c, d)
 		return nil
 	case *compute.CreateCluster:
 		if c.Autoscale == nil {
 			c.ForceSendFields = append(c.ForceSendFields, "NumWorkers")
 		}
-		// If workload type is set by the user, the fields within Clients should always be sent.
-		// These default to true if not set.
 		if c.WorkloadType != nil {
 			c.WorkloadType.Clients.ForceSendFields = []string{"Jobs", "Notebooks"}
 		}
-		setEmptyMapFieldsForCluster(&c.ForceSendFields, func(name string, m map[string]string) {
-			switch name {
-			case "SparkEnvVars":
-				c.SparkEnvVars = m
-			case "SparkConf":
-				c.SparkConf = m
-			case "CustomTags":
-				c.CustomTags = m
-			}
-		}, d)
+		setEmptyMapFieldsForCluster(c, d)
 		return nil
 	case *compute.EditCluster:
 		if c.Autoscale == nil {
 			c.ForceSendFields = append(c.ForceSendFields, "NumWorkers")
 		}
-		// If workload type is set by the user, the fields within Clients should always be sent.
-		// These default to true if not set.
 		if c.WorkloadType != nil {
 			c.WorkloadType.Clients.ForceSendFields = []string{"Jobs", "Notebooks"}
 		}
-		setEmptyMapFieldsForCluster(&c.ForceSendFields, func(name string, m map[string]string) {
-			switch name {
-			case "SparkEnvVars":
-				c.SparkEnvVars = m
-			case "SparkConf":
-				c.SparkConf = m
-			case "CustomTags":
-				c.CustomTags = m
-			}
-		}, d)
+		setEmptyMapFieldsForCluster(c, d)
 		return nil
 	default:
 		return fmt.Errorf(unsupportedExceptCreateEditClusterSpecErr, cluster, "*", "*", "*")
