@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+* Fixed `databricks_cluster` ignoring empty map values for `spark_env_vars`, `spark_conf`, and `custom_tags`, which prevented clearing previously-set values.
 * Handle error during WorkspaceClient() creation in databricks_grant and databricks_grants resources ([#5403](https://github.com/databricks/terraform-provider-databricks/pull/5403))
 
 ### Documentation
