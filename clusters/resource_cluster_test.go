@@ -2362,3 +2362,94 @@ func TestResourceClusterUpdate_UnchangedSparkEnvVarsUnaffected(t *testing.T) {
 	assert.NotContains(t, cluster.ForceSendFields, "SparkEnvVars",
 		"SparkEnvVars should NOT be in ForceSendFields when unchanged")
 }
+
+func TestResourceClusterRead_ExternalSparkEnvVarsDetectedWhenConfiguredEmpty(t *testing.T) {
+	d, err := qa.ResourceFixture{
+		Fixtures: []qa.HTTPFixture{
+			nothingPinned,
+			{
+				Method:       "GET",
+				ReuseRequest: true,
+				Resource:     "/api/2.1/clusters/get?cluster_id=abc",
+				Response: compute.ClusterDetails{
+					ClusterId:              "abc",
+					NumWorkers:             100,
+					ClusterName:            "Shared Autoscaling",
+					SparkVersion:           "7.1-scala12",
+					NodeTypeId:             "i3.xlarge",
+					AutoterminationMinutes: 15,
+					SparkEnvVars:           map[string]string{"EXTERNAL": "value"},
+					State:                  compute.StateRunning,
+				},
+			},
+			{
+				Method:   "GET",
+				Resource: "/api/2.0/libraries/cluster-status?cluster_id=abc",
+				Response: compute.ClusterLibraryStatuses{
+					LibraryStatuses: []compute.LibraryFullStatus{},
+				},
+			},
+		},
+		Read:     true,
+		ID:       "abc",
+		Resource: ResourceCluster(),
+		InstanceState: map[string]string{
+			"autotermination_minutes": "15",
+			"cluster_name":            "Shared Autoscaling",
+			"spark_version":           "7.1-scala12",
+			"node_type_id":            "i3.xlarge",
+			"num_workers":             "100",
+			"spark_env_vars.%":        "0",
+		},
+	}.Apply(t)
+	require.NoError(t, err)
+
+	sparkEnvVars := d.Get("spark_env_vars").(map[string]interface{})
+	assert.Equal(t, "value", sparkEnvVars["EXTERNAL"],
+		"Externally-added spark_env_vars should appear in state when user configured empty map")
+}
+
+func TestResourceClusterRead_ExternalSparkEnvVarsIgnoredWhenNotConfigured(t *testing.T) {
+	d, err := qa.ResourceFixture{
+		Fixtures: []qa.HTTPFixture{
+			nothingPinned,
+			{
+				Method:       "GET",
+				ReuseRequest: true,
+				Resource:     "/api/2.1/clusters/get?cluster_id=abc",
+				Response: compute.ClusterDetails{
+					ClusterId:              "abc",
+					NumWorkers:             100,
+					ClusterName:            "Shared Autoscaling",
+					SparkVersion:           "7.1-scala12",
+					NodeTypeId:             "i3.xlarge",
+					AutoterminationMinutes: 15,
+					SparkEnvVars:           map[string]string{"EXTERNAL": "value"},
+					State:                  compute.StateRunning,
+				},
+			},
+			{
+				Method:   "GET",
+				Resource: "/api/2.0/libraries/cluster-status?cluster_id=abc",
+				Response: compute.ClusterLibraryStatuses{
+					LibraryStatuses: []compute.LibraryFullStatus{},
+				},
+			},
+		},
+		Read:     true,
+		ID:       "abc",
+		Resource: ResourceCluster(),
+		InstanceState: map[string]string{
+			"autotermination_minutes": "15",
+			"cluster_name":            "Shared Autoscaling",
+			"spark_version":           "7.1-scala12",
+			"node_type_id":            "i3.xlarge",
+			"num_workers":             "100",
+		},
+	}.Apply(t)
+	require.NoError(t, err)
+
+	sparkEnvVars := d.Get("spark_env_vars").(map[string]interface{})
+	assert.Empty(t, sparkEnvVars,
+		"Externally-added spark_env_vars should NOT appear in state when user did not configure the field")
+}

@@ -246,6 +246,32 @@ var clusterMapFields = map[string]string{
 	"custom_tags":    "CustomTags",
 }
 
+// setServerMapFieldsForConfiguredEmptyMaps forces server-returned map values
+// into state when the user configured a field as empty (e.g. spark_env_vars = {}).
+// StructToData drops these because d.GetOk returns false for empty maps, which
+// prevents drift detection for externally-added values.
+func setServerMapFieldsForConfiguredEmptyMaps(d *schema.ResourceData, clusterInfo *compute.ClusterDetails) {
+	serverMaps := map[string]map[string]string{
+		"spark_env_vars": clusterInfo.SparkEnvVars,
+		"spark_conf":     clusterInfo.SparkConf,
+		"custom_tags":    clusterInfo.CustomTags,
+	}
+	for tfName, serverValue := range serverMaps {
+		if len(serverValue) == 0 {
+			continue
+		}
+		v, ok := d.GetOkExists(tfName)
+		if !ok {
+			continue
+		}
+		existingMap, _ := v.(map[string]interface{})
+		if len(existingMap) != 0 {
+			continue
+		}
+		d.Set(tfName, serverValue)
+	}
+}
+
 // setEmptyMapFieldsForCluster detects when a user has changed a map field to
 // empty (e.g. spark_env_vars = {}) and ensures the empty map is sent to the
 // API so that previously set values can be cleared. Without this, d.GetOk
@@ -553,6 +579,7 @@ func resourceClusterRead(ctx context.Context, d *schema.ResourceData, c *common.
 	if err = common.StructToData(clusterInfo, clusterSchema, d); err != nil {
 		return err
 	}
+	setServerMapFieldsForConfiguredEmptyMaps(d, clusterInfo)
 	if err = setPinnedStatus(ctx, d, clusterAPI); err != nil {
 		return err
 	}
