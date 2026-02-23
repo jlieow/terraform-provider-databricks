@@ -218,6 +218,16 @@ func updateTags(ctx context.Context, w *databricks.WorkspaceClient, name string,
 	return nil
 }
 
+// setForceSendFieldsForRateLimits populates ForceSendFields on each AiGatewayRateLimit
+// so that zero values for Calls/Tokens are serialized in JSON instead of being omitted.
+// Both fields are always force-sent because the API validates that exactly one of
+// calls or tokens is specified, and omitting a zero value would hide the user's intent.
+func setForceSendFieldsForRateLimits(rateLimits []serving.AiGatewayRateLimit) {
+	for i := range rateLimits {
+		rateLimits[i].ForceSendFields = append(rateLimits[i].ForceSendFields, "Calls", "Tokens")
+	}
+}
+
 // Update the AI Gateway configuration for a model serving endpoint.
 func updateAiGateway(ctx context.Context, w *databricks.WorkspaceClient, name string, newAiGateway serving.AiGatewayConfig, d *schema.ResourceData) error {
 	_, err := w.ServingEndpoints.PutAiGateway(ctx, serving.PutAiGatewayRequest{
@@ -421,6 +431,9 @@ func ResourceModelServing() common.Resource {
 			}
 			var e serving.CreateServingEndpoint
 			common.DataToStructPointer(d, s, &e)
+			if e.AiGateway != nil {
+				setForceSendFieldsForRateLimits(e.AiGateway.RateLimits)
+			}
 			wait, err := w.ServingEndpoints.Create(ctx, e)
 			if err != nil {
 				return err
@@ -492,6 +505,7 @@ func ResourceModelServing() common.Resource {
 				}
 			}
 			if d.HasChange("ai_gateway") {
+				setForceSendFieldsForRateLimits(e.AiGateway.RateLimits)
 				if err := updateAiGateway(ctx, w, e.Name, *e.AiGateway, d); err != nil {
 					return err
 				}

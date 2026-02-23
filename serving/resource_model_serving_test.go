@@ -837,6 +837,126 @@ func TestModelServingReadWithMultipleSensitiveFields(t *testing.T) {
 	})
 }
 
+func TestModelServingUpdateAiGatewayRateLimitCallsZero(t *testing.T) {
+	qa.ResourceFixture{
+		MockWorkspaceClientFunc: func(w *mocks.MockWorkspaceClient) {
+			w.GetMockServingEndpointsAPI().EXPECT().
+				PutAiGateway(mock.Anything, mock.MatchedBy(func(req serving.PutAiGatewayRequest) bool {
+					if len(req.RateLimits) != 1 {
+						return false
+					}
+					rl := req.RateLimits[0]
+					return rl.Calls == 0 &&
+						rl.Key == serving.AiGatewayRateLimitKeyEndpoint &&
+						rl.RenewalPeriod == serving.AiGatewayRateLimitRenewalPeriodMinute &&
+						assert.Contains(t, rl.ForceSendFields, "Calls") &&
+						assert.Contains(t, rl.ForceSendFields, "Tokens")
+				})).
+				Return(&serving.PutAiGatewayResponse{}, nil)
+			w.GetMockServingEndpointsAPI().EXPECT().
+				GetByName(mock.Anything, "test-endpoint").
+				Return(&serving.ServingEndpointDetailed{
+					Id:   "test-endpoint",
+					Name: "test-endpoint",
+					State: &serving.EndpointState{
+						ConfigUpdate: serving.EndpointStateConfigUpdateNotUpdating,
+					},
+					AiGateway: &serving.AiGatewayConfig{
+						RateLimits: []serving.AiGatewayRateLimit{
+							{
+								Calls:         0,
+								Key:           serving.AiGatewayRateLimitKeyEndpoint,
+								RenewalPeriod: serving.AiGatewayRateLimitRenewalPeriodMinute,
+							},
+						},
+						UsageTrackingConfig: &serving.AiGatewayUsageTrackingConfig{
+							Enabled: true,
+						},
+					},
+				}, nil)
+		},
+		Resource: ResourceModelServing(),
+		Update:   true,
+		ID:       "test-endpoint",
+		InstanceState: map[string]string{
+			"name": "test-endpoint",
+		},
+		HCL: `
+			name = "test-endpoint"
+			ai_gateway {
+				usage_tracking_config {
+					enabled = true
+				}
+				rate_limits {
+					calls          = 0
+					key            = "endpoint"
+					renewal_period = "minute"
+				}
+			}
+			`,
+	}.ApplyNoError(t)
+}
+
+func TestModelServingUpdateAiGatewayRateLimitTokensZero(t *testing.T) {
+	qa.ResourceFixture{
+		MockWorkspaceClientFunc: func(w *mocks.MockWorkspaceClient) {
+			w.GetMockServingEndpointsAPI().EXPECT().
+				PutAiGateway(mock.Anything, mock.MatchedBy(func(req serving.PutAiGatewayRequest) bool {
+					if len(req.RateLimits) != 1 {
+						return false
+					}
+					rl := req.RateLimits[0]
+					return rl.Tokens == 0 &&
+						rl.Key == serving.AiGatewayRateLimitKeyEndpoint &&
+						rl.RenewalPeriod == serving.AiGatewayRateLimitRenewalPeriodMinute &&
+						assert.Contains(t, rl.ForceSendFields, "Calls") &&
+						assert.Contains(t, rl.ForceSendFields, "Tokens")
+				})).
+				Return(&serving.PutAiGatewayResponse{}, nil)
+			w.GetMockServingEndpointsAPI().EXPECT().
+				GetByName(mock.Anything, "test-endpoint").
+				Return(&serving.ServingEndpointDetailed{
+					Id:   "test-endpoint",
+					Name: "test-endpoint",
+					State: &serving.EndpointState{
+						ConfigUpdate: serving.EndpointStateConfigUpdateNotUpdating,
+					},
+					AiGateway: &serving.AiGatewayConfig{
+						RateLimits: []serving.AiGatewayRateLimit{
+							{
+								Tokens:        0,
+								Key:           serving.AiGatewayRateLimitKeyEndpoint,
+								RenewalPeriod: serving.AiGatewayRateLimitRenewalPeriodMinute,
+							},
+						},
+						UsageTrackingConfig: &serving.AiGatewayUsageTrackingConfig{
+							Enabled: true,
+						},
+					},
+				}, nil)
+		},
+		Resource: ResourceModelServing(),
+		Update:   true,
+		ID:       "test-endpoint",
+		InstanceState: map[string]string{
+			"name": "test-endpoint",
+		},
+		HCL: `
+			name = "test-endpoint"
+			ai_gateway {
+				usage_tracking_config {
+					enabled = true
+				}
+				rate_limits {
+					tokens         = 0
+					key            = "endpoint"
+					renewal_period = "minute"
+				}
+			}
+			`,
+	}.ApplyNoError(t)
+}
+
 // TestCopySensitiveFields tests the reflection-based sensitive field copying logic
 func TestCopySensitiveFields(t *testing.T) {
 	// Test case 1: Simple plaintext field copy
