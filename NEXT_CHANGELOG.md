@@ -11,6 +11,7 @@
 
 ### Bug Fixes
 
+* Fixed `databricks_model_serving` dropping `calls = 0` or `tokens = 0` in `ai_gateway.rate_limits`, which caused API errors ([#5333](https://github.com/databricks/terraform-provider-databricks/issues/5333)).
 * Handle error during WorkspaceClient() creation in databricks_grant and databricks_grants resources ([#5403](https://github.com/databricks/terraform-provider-databricks/pull/5403))
 
 ### Documentation
