@@ -850,7 +850,7 @@ func TestModelServingUpdateAiGatewayRateLimitCallsZero(t *testing.T) {
 						rl.Key == serving.AiGatewayRateLimitKeyEndpoint &&
 						rl.RenewalPeriod == serving.AiGatewayRateLimitRenewalPeriodMinute &&
 						assert.Contains(t, rl.ForceSendFields, "Calls") &&
-						assert.Contains(t, rl.ForceSendFields, "Tokens")
+						assert.NotContains(t, rl.ForceSendFields, "Tokens")
 				})).
 				Return(&serving.PutAiGatewayResponse{}, nil)
 			w.GetMockServingEndpointsAPI().EXPECT().
@@ -909,7 +909,7 @@ func TestModelServingUpdateAiGatewayRateLimitTokensZero(t *testing.T) {
 					return rl.Tokens == 0 &&
 						rl.Key == serving.AiGatewayRateLimitKeyEndpoint &&
 						rl.RenewalPeriod == serving.AiGatewayRateLimitRenewalPeriodMinute &&
-						assert.Contains(t, rl.ForceSendFields, "Calls") &&
+						assert.NotContains(t, rl.ForceSendFields, "Calls") &&
 						assert.Contains(t, rl.ForceSendFields, "Tokens")
 				})).
 				Return(&serving.PutAiGatewayResponse{}, nil)

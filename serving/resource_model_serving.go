@@ -2,6 +2,7 @@ package serving
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"reflect"
 	"strings"
@@ -220,11 +221,16 @@ func updateTags(ctx context.Context, w *databricks.WorkspaceClient, name string,
 
 // setForceSendFieldsForRateLimits populates ForceSendFields on each AiGatewayRateLimit
 // so that zero values for Calls/Tokens are serialized in JSON instead of being omitted.
-// Both fields are always force-sent because the API validates that exactly one of
-// calls or tokens is specified, and omitting a zero value would hide the user's intent.
-func setForceSendFieldsForRateLimits(rateLimits []serving.AiGatewayRateLimit) {
+// Only the field explicitly set by the user is force-sent, since the API requires exactly
+// one of calls or tokens and rejects requests containing both.
+func setForceSendFieldsForRateLimits(rateLimits []serving.AiGatewayRateLimit, d *schema.ResourceData, prefix string) {
 	for i := range rateLimits {
-		rateLimits[i].ForceSendFields = append(rateLimits[i].ForceSendFields, "Calls", "Tokens")
+		if _, ok := d.GetOkExists(fmt.Sprintf("%s.%d.calls", prefix, i)); ok {
+			rateLimits[i].ForceSendFields = append(rateLimits[i].ForceSendFields, "Calls")
+		}
+		if _, ok := d.GetOkExists(fmt.Sprintf("%s.%d.tokens", prefix, i)); ok {
+			rateLimits[i].ForceSendFields = append(rateLimits[i].ForceSendFields, "Tokens")
+		}
 	}
 }
 
@@ -432,7 +438,7 @@ func ResourceModelServing() common.Resource {
 			var e serving.CreateServingEndpoint
 			common.DataToStructPointer(d, s, &e)
 			if e.AiGateway != nil {
-				setForceSendFieldsForRateLimits(e.AiGateway.RateLimits)
+				setForceSendFieldsForRateLimits(e.AiGateway.RateLimits, d, "ai_gateway.0.rate_limits")
 			}
 			wait, err := w.ServingEndpoints.Create(ctx, e)
 			if err != nil {
@@ -505,7 +511,7 @@ func ResourceModelServing() common.Resource {
 				}
 			}
 			if d.HasChange("ai_gateway") {
-				setForceSendFieldsForRateLimits(e.AiGateway.RateLimits)
+				setForceSendFieldsForRateLimits(e.AiGateway.RateLimits, d, "ai_gateway.0.rate_limits")
 				if err := updateAiGateway(ctx, w, e.Name, *e.AiGateway, d); err != nil {
 					return err
 				}
