@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
-	"strings"
-	"time"
 
 	"github.com/databricks/databricks-sdk-go"
 	"github.com/databricks/databricks-sdk-go/apierr"
@@ -260,19 +258,13 @@ func (a *resourceApp) Read(ctx context.Context, req resource.ReadRequest, resp *
 func (a *resourceApp) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	ctx = pluginfwcontext.SetUserAgentInResourceContext(ctx, resourceName)
 
-	var plan AppResource
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	var app AppResource
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &app)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	var state AppResource
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	workspaceID, diags := tfschema.GetWorkspaceIDResource(ctx, plan.ProviderConfig)
+	workspaceID, diags := tfschema.GetWorkspaceIDResource(ctx, app.ProviderConfig)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -284,103 +276,31 @@ func (a *resourceApp) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
-	// Convert plan to Go SDK struct
+	// Update the app
 	var appGoSdk apps.App
-	resp.Diagnostics.Append(converters.TfSdkToGoSdkStruct(ctx, plan, &appGoSdk)...)
+	resp.Diagnostics.Append(converters.TfSdkToGoSdkStruct(ctx, app, &appGoSdk)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-
-	// Build update mask by comparing plan and state
-	updateMask := a.buildUpdateMask(ctx, plan, state)
-	if updateMask == "" {
-		// No changes detected, nothing to update
-		resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
-		return
-	}
-
-	// Use CreateUpdate for async update with update_mask
-	waiter, err := w.Apps.CreateUpdate(ctx, apps.AsyncUpdateAppRequest{
-		AppName:    appGoSdk.Name,
-		App:        &appGoSdk,
-		UpdateMask: updateMask,
-	})
+	response, err := w.Apps.Update(ctx, apps.UpdateAppRequest{App: appGoSdk, Name: app.Name.ValueString()})
 	if err != nil {
 		resp.Diagnostics.AddError("failed to update app", err.Error())
 		return
 	}
 
-	// Wait for the update to complete
-	update, err := waiter.GetWithTimeout(20 * time.Minute)
-	if err != nil {
-		resp.Diagnostics.AddError("error waiting for app update to complete", err.Error())
-		return
-	}
-
-	// Check if the update succeeded
-	if update.Status.State == apps.AppUpdateUpdateStatusUpdateStateFailed {
-		resp.Diagnostics.AddError("app update failed", update.Status.Message)
-		return
-	}
-
-	// Fetch the updated app state
-	finalApp, err := w.Apps.GetByName(ctx, appGoSdk.Name)
-	if err != nil {
-		resp.Diagnostics.AddError("failed to read updated app", err.Error())
-		return
-	}
-
 	// Store the updated version of the app in state
 	var newApp AppResource
-	resp.Diagnostics.Append(converters.GoSdkToTfSdkStruct(ctx, finalApp, &newApp)...)
+	resp.Diagnostics.Append(converters.GoSdkToTfSdkStruct(ctx, response, &newApp)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 	// Modifying no_compute after creation has no effect.
-	newApp.NoCompute = plan.NoCompute
-	newApp.ProviderConfig = plan.ProviderConfig
+	newApp.NoCompute = app.NoCompute
+	newApp.ProviderConfig = app.ProviderConfig
 	resp.Diagnostics.Append(resp.State.Set(ctx, newApp)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-}
-
-// buildUpdateMask builds the update_mask string by comparing plan and state
-// Returns a comma-separated list of field names that have changed
-func (a *resourceApp) buildUpdateMask(ctx context.Context, plan, state AppResource) string {
-	var changedFields []string
-
-	// Check each field that can be updated
-	if !plan.Description.Equal(state.Description) {
-		changedFields = append(changedFields, "description")
-	}
-
-	if !plan.GitRepository.Equal(state.GitRepository) {
-		changedFields = append(changedFields, "git_repository")
-	}
-
-	if !plan.Resources.Equal(state.Resources) {
-		changedFields = append(changedFields, "resources")
-	}
-
-	if !plan.BudgetPolicyId.Equal(state.BudgetPolicyId) {
-		changedFields = append(changedFields, "budget_policy_id")
-	}
-
-	if !plan.ComputeSize.Equal(state.ComputeSize) {
-		changedFields = append(changedFields, "compute_size")
-	}
-
-	if !plan.UsagePolicyId.Equal(state.UsagePolicyId) {
-		changedFields = append(changedFields, "usage_policy_id")
-	}
-
-	if !plan.UserApiScopes.Equal(state.UserApiScopes) {
-		changedFields = append(changedFields, "user_api_scopes")
-	}
-
-	// Join fields with comma separator
-	return strings.Join(changedFields, ",")
 }
 
 func (a *resourceApp) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
