@@ -38,7 +38,7 @@ resource "databricks_app_deployment" "this" {
 
 ### Deploy from Git Branch
 
--> **Note** Git-based deployments require the `git_repository` block on `databricks_app`, which is available when [#5378](https://github.com/databricks/terraform-provider-databricks/pull/5378) is merged.
+-> **Note** Git-based deployments require the `git_repository` block on [`databricks_app`](app.md) as the Git repository URL is defined at the app level.
 
 ```hcl
 resource "databricks_git_credential" "github" {
