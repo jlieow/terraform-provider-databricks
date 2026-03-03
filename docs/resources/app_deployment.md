@@ -38,6 +38,8 @@ resource "databricks_app_deployment" "this" {
 
 ### Deploy from Git Branch
 
+-> **Note** Git-based deployments require the `git_repository` block on `databricks_app`, which is available when [#5378](https://github.com/databricks/terraform-provider-databricks/pull/5378) is merged.
+
 ```hcl
 resource "databricks_git_credential" "github" {
   git_provider          = "gitHub"
@@ -151,7 +153,7 @@ The `git_source` block requires exactly one of the following:
 
 The following is optional:
 
-* `source_code_path` - (Optional) Relative path to the app source code within the Git repository. Use `"/"` for the root of the repository, or a path like `"/apps/myapp"` for a subdirectory. If not specified, defaults to the root. **Note:** Use `"/"` for root, not `"."`.
+* `source_code_path` - (Optional) Relative path to the app source code within the Git repository. Use `"/"` for the root of the repository, or a path like `"/apps/myapp"` for a subdirectory. If not specified, defaults to the root. **Note:** This field may not be available in all workspaces.
 
 -> **Note** The `git_repository` (provider and URL) must be configured at the app level using the `databricks_app` resource's `git_repository` block. See the examples above.
 
