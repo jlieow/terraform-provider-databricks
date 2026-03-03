@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/databricks/databricks-sdk-go/apierr"
 	"github.com/databricks/databricks-sdk-go/service/apps"
 	"github.com/databricks/terraform-provider-databricks/common"
 	pluginfwcommon "github.com/databricks/terraform-provider-databricks/internal/providers/pluginfw/common"
@@ -377,6 +378,10 @@ func (r *resourceAppDeployment) Read(ctx context.Context, req resource.ReadReque
 
 	deployment, err := w.Apps.GetDeploymentByAppNameAndDeploymentId(ctx, state.AppName.ValueString(), state.DeploymentId.ValueString())
 	if err != nil {
+		if apierr.IsMissing(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("failed to read app deployment", err.Error())
 		return
 	}
@@ -488,6 +493,7 @@ func (r *resourceAppDeployment) ImportState(ctx context.Context, req resource.Im
 	state.AppName = types.StringValue(parts[0])
 	state.DeploymentId = types.StringValue(parts[1])
 	state.Triggers = types.MapNull(types.StringType)
+	state.GitSource = types.ObjectNull(gitSourceAttrTypes())
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
 
