@@ -361,6 +361,7 @@ func (ClusterSpec) CustomizeSchema(s *common.CustomizableSchema) *common.Customi
 	s.SchemaPath("spark_env_vars").SetComputed()
 	s.SchemaPath("custom_tags").SetComputed()
 	s.SchemaPath("use_ml_runtime").SetComputed()
+	s.SchemaPath("is_single_node").SetComputed()
 	s.SchemaPath("kind").SetComputed()
 	s.SchemaPath("single_user_name").SetComputed()
 	s.SchemaPath("driver_node_type_flexibility").SetComputed()
