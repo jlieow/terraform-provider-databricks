@@ -702,7 +702,7 @@ func StructToData(result any, s map[string]*schema.Schema, d *schema.ResourceDat
 			return nil
 		}
 		fieldPath := strings.Join(path, ".")
-		if fieldSchema.Optional && isValueNilOrEmpty(valueField, fieldPath) {
+		if fieldSchema.Optional && !fieldSchema.Computed && isValueNilOrEmpty(valueField, fieldPath) {
 			return nil
 		}
 		_, configured := d.GetOk(fieldPath)
